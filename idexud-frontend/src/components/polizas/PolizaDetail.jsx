@@ -6,6 +6,7 @@
 //   - Indicador visual del flujo de estados
 
 import React, { useState } from "react";
+import { toast } from "sonner";
 import { useAuth, LABEL_ESTADO, COLOR_ESTADO } from "../../context/AuthContext";
 
 // ── Componente: Botón NextCloud ────────────────────────────────────
@@ -233,7 +234,20 @@ export default function PolizaDetail({ poliza, onTransicionar, onGuardar }) {
   const checklistActual = CHECKLIST_CONFIG[estadoActual];
 
   const toggleItem = (itemId) => {
-    setChecklistEstado((prev) => ({ ...prev, [itemId]: !prev[itemId] }));
+    const completando = !checklistEstado[itemId];
+    const item = checklistActual?.items.find((i) => i.id === itemId);
+    setChecklistEstado((prev) => ({ ...prev, [itemId]: completando }));
+    if (completando) {
+      toast.success(`${item?.icono ?? "✓"} ${item?.label ?? "Paso completado"}`, {
+        description: `Marcado por: ${usuario.nombre} (${usuario.rol})`,
+        duration: 2500,
+      });
+    } else {
+      toast(`${item?.label ?? "Paso"} desmarcado`, {
+        description: "El paso volvió a estado pendiente.",
+        duration: 2000,
+      });
+    }
   };
 
   const puedeTogglearItem = (item) => {

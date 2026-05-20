@@ -109,6 +109,15 @@ export const seedApi = {
   demo: () => api.post('/seed/demo'),
 };
 export const checklistApi = {
-  obtener: (polizaId) => api.get(`/polizas/${polizaId}/checklist`),
+  obtener:    (polizaId) => api.get(`/polizas/${polizaId}/checklist`),
   actualizar: (polizaId, cambios) => api.patch(`/polizas/${polizaId}/checklist`, cambios),
+};
+
+export const carteraApi = {
+  // GET /cartera/?estado=PAGADO&busqueda=...
+  listar:     (params)      => api.get('/cartera/', { params }),
+  // GET /cartera/:id
+  obtener:    (id)          => api.get(`/cartera/${id}`),
+  // PATCH /cartera/:id  — solo los campos que cambian (estado, OP, fecha, enlace)
+  actualizar: (id, cambios) => api.patch(`/cartera/${id}`, cambios),
 };

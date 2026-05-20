@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { ArrowLeft, User, DollarSign, Loader2, Lock, Check, ExternalLink, AlertTriangle } from 'lucide-react';
 import { usePolizaDetalle, useChecklist } from '../../hooks/usePolizaDetalle';
 import { BadgeEstado } from "../../components/ui/Badge";
@@ -47,6 +48,20 @@ export default function PolizaDetail() {
   const { checklist, guardando, setChecklist, togglePaso } = useChecklist(id);
 
   useEffect(() => { if (poliza?.checklist) setChecklist(poliza.checklist); }, [poliza, setChecklist]);
+
+  const handleTogglePaso = useCallback(async (campo, completado) => {
+    try {
+      await togglePaso(campo, completado);
+      const paso = PASOS.find((p) => p.campo === campo);
+      if (!completado) {
+        toast.success(`✓ ${paso?.label ?? 'Paso completado'}`, { duration: 2500 });
+      } else {
+        toast(`${paso?.label ?? 'Paso'} desmarcado`, { duration: 2000 });
+      }
+    } catch {
+      toast.error('No se pudo actualizar el paso. Intente de nuevo.');
+    }
+  }, [togglePaso]);
 
   const puedeEditar = (pasoRol) => {
     if (!usuario || !usuario.rol) return false;
@@ -96,7 +111,7 @@ export default function PolizaDetail() {
           <h2 className="text-lg font-bold mb-4">Checklist de Flujo de Trabajo</h2>
           <div className="space-y-2">
             {PASOS.map((paso) => (
-              <PasoChecklist key={paso.campo} paso={paso} checklist={checklist} guardando={guardando} onToggle={togglePaso} disabled={!puedeEditar(paso.rol)} />
+              <PasoChecklist key={paso.campo} paso={paso} checklist={checklist} guardando={guardando} onToggle={handleTogglePaso} disabled={!puedeEditar(paso.rol)} />
             ))}
           </div>
         </div>

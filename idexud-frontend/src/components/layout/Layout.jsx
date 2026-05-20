@@ -15,21 +15,18 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  LogOut,
   Calendar,
   Building2,
   Users,
-  Menu,
 } from 'lucide-react';
 
-// 👇 1. IMPORTAMOS EL SELECTOR DE ROLES
 import { UserRolBadge } from '../../context/AuthContext';
 
 const NAV_PRINCIPAL = [
   { label: 'Inicio', icon: LayoutDashboard, href: '/', exact: true, descripcion: 'Panel de control' },
   { label: 'Pólizas', icon: FileText, href: '/polizas', descripcion: 'Gestión de pólizas' },
   { label: 'Por Vencer', icon: AlertTriangle, href: '/por-vencer', descripcion: 'Alertas', badge: 'alertas' },
-  { label: 'Cartera', icon: Wallet, href: '/cartera', descripcion: 'Legalización' },
+  { label: 'Cartera', icon: Wallet, href: '/cartera', descripcion: 'Legalización y Cartera' },
   { label: 'Corredores', icon: Users, href: '/Corredores', descripcion: 'Corredores' },
   { label: 'Aseguradoras', icon: Building2, href: '/aseguradoras', descripcion: 'Aseguradoras' },
 ];
@@ -47,7 +44,8 @@ function NavItem({ item, collapsed, alertaCount }) {
     <NavLink
       to={item.href}
       className={({ isActive }) =>
-        `group relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive ? 'bg-ud-naranja text-white shadow-md' : 'text-gray-400 hover:bg-white/10 hover:text-white'
+        `group relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
+          isActive ? 'bg-ud-naranja text-white shadow-md' : 'text-gray-400 hover:bg-white/10 hover:text-white'
         }`
       }
     >
@@ -83,7 +81,6 @@ function Sidebar({ collapsed, onToggle, alertaCount }) {
   );
 }
 
-// ── ACTUALIZAMOS LA TOPBAR PARA INCLUIR EL SELECTOR ──────────────────────────
 function Topbar({ sidebarCollapsed, title, breadcrumb }) {
   return (
     <header
@@ -94,18 +91,12 @@ function Topbar({ sidebarCollapsed, title, breadcrumb }) {
         <span className="text-[10px] text-gray-400 uppercase tracking-wider">{breadcrumb}</span>
         <h1 className="text-base font-bold text-gray-800">{title}</h1>
       </div>
-
       <div className="flex items-center gap-4">
-        {/* 👇 2. AQUÍ INSERTAMOS EL COMPONENTE DE ROLES */}
         <UserRolBadge />
-
         <div className="h-6 w-px bg-gray-100 mx-2" />
-
         <div className="flex items-center gap-2">
           <Calendar size={14} className="text-gray-400" />
-          <span className="text-xs text-gray-500 hidden md:block">
-            {new Date().toLocaleDateString('es-CO')}
-          </span>
+          <span className="text-xs text-gray-500 hidden md:block">{new Date().toLocaleDateString('es-CO')}</span>
         </div>
       </div>
     </header>
