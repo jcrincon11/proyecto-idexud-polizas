@@ -1,0 +1,15 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Idexud - PostgreSQL (Local)",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "postgres",
+      "Username": "idexud_user",
+      "SSLMode": "prefer",
+      "PassFile": "/pgpassfile",
+      "Comment": "Servidor principal del Sistema de Pólizas Idexud"
+    }
+  }
+}

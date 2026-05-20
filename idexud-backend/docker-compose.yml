@@ -1,0 +1,123 @@
+###############################################################################
+#  docker-compose.yml — Sistema de Pólizas Idexud / Universidad Distrital
+#
+#  Servicios:
+#    postgres  → Motor de base de datos PostgreSQL 16
+#    pgadmin   → Interfaz gráfica para explorar la DB (demos / desarrollo)
+#    api       → Backend FastAPI (descomentarlo cuando el código esté listo)
+#
+#  Uso rápido:
+#    cp .env.example .env          # 1. Copiar y ajustar variables
+#    docker compose up -d          # 2. Levantar en segundo plano
+#    docker compose logs -f api    # 3. Ver logs del backend
+#
+#  URLs en desarrollo:
+#    pgAdmin  → http://localhost:5050
+#    API docs → http://localhost:8000/docs   (cuando la api esté activa)
+###############################################################################
+
+services:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # PostgreSQL 16
+  # ──────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: idexud_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+      # Ajuste de encoding para caracteres especiales del español (tildes, ñ)
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=es_CO.UTF-8"
+    volumes:
+      # Persistencia de datos entre reinicios
+      - postgres_data:/var/lib/postgresql/data
+      # Scripts SQL que se ejecutan la PRIMERA vez que se crea el contenedor
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - idexud_network
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # pgAdmin 4 — Interfaz gráfica para PostgreSQL
+  #   Acceso → http://localhost:5050
+  #   Login  → EMAIL y PASSWORD definidos abajo (o en .env)
+  #
+  #  Para conectar pgAdmin a PostgreSQL:
+  #    Host: postgres   (nombre del servicio Docker, no "localhost")
+  #    Port: 5432
+  #    DB:   valor de POSTGRES_DB
+  #    User: valor de POSTGRES_USER
+  #    Pass: valor de POSTGRES_PASSWORD
+  # ──────────────────────────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: idexud_pgadmin
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL:    ${PGADMIN_EMAIL:-admin@idexud.edu.co}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-idexud2024}
+      PGADMIN_CONFIG_SERVER_MODE: "False"   # Modo escritorio (sin login)
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    volumes:
+      # Persiste la configuración de servidores guardada en pgAdmin
+      - pgadmin_data:/var/lib/pgadmin
+      # Pre-configura la conexión al servidor Postgres automáticamente
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    networks:
+      - idexud_network
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # FastAPI — Backend (descomentar en Fase de despliegue)
+  # ──────────────────────────────────────────────────────────────────────────
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: idexud_api
+  #   restart: unless-stopped
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  #     SECRET_KEY:   ${SECRET_KEY}
+  #     ENVIRONMENT:  ${ENVIRONMENT:-development}
+  #   volumes:
+  #     - ./app:/code/app              # Hot-reload en desarrollo
+  #     - ./uploads:/code/uploads      # Documentos de pólizas
+  #   ports:
+  #     - "${API_PORT:-8000}:8000"
+  #   networks:
+  #     - idexud_network
+
+# ──────────────────────────────────────────────────────────────────────────
+# Volúmenes nombrados (gestionados por Docker, sobreviven docker compose down)
+# ──────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    name: idexud_postgres_data
+  pgadmin_data:
+    name: idexud_pgadmin_data
+
+# ──────────────────────────────────────────────────────────────────────────
+# Red interna (los servicios se comunican por nombre, no por IP)
+# ──────────────────────────────────────────────────────────────────────────
+networks:
+  idexud_network:
+    name: idexud_network
+    driver: bridge

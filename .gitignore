@@ -1,0 +1,12 @@
+# Carpetas pesadas
+node_modules/
+.venv/
+venv/
+env/
+
+# Configuración y secretos
+.env
+.vscode/
+.DS_Store
+__pycache__/
+*.py[cod]
