@@ -1,160 +1,135 @@
 """
-app/routers/solicitudes.py
-===========================
-Router dedicado al flujo de BORRADOR (etapa PMO).
-Completamente independiente de /polizas para no romper nada existente.
+app/api/v1/endpoints/solicitudes.py
+=====================================
+Flujo PMO — crea una póliza en estado BORRADOR con los datos mínimos.
 
-Registro en main.py:
-  from app.routers.solicitudes import router as solicitudes_router
-  app.include_router(solicitudes_router, prefix="/api/v1")
-
-Endpoint expuesto:
-  POST  /api/v1/solicitudes          ← PMO crea solicitud inicial
-  GET   /api/v1/solicitudes/{id}     ← Consultar una solicitud
+Endpoints:
+  POST /solicitudes       → PMO crea solicitud inicial
+  GET  /solicitudes/{id}  → Consultar una solicitud por ID
 """
-
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# ── Ajusta estos imports a tu estructura de carpetas real ──────────
-# from app.core.database import get_db
-# from app.models.poliza import Poliza, EstadoPoliza
-# from app.schemas.solicitud import SolicitudCreate, SolicitudResponse, generar_numero_radicado
-
-# Para que el archivo sea autónomo en el ejemplo, los dejamos como
-# referencias comentadas. El bloque de código real está abajo.
+from app.api.deps import get_db
+from app.models.aseguradora import Aseguradora
+from app.models.checklist import ChecklistExpedicion
+from app.models.contratista import Contratista
+from app.models.poliza import EstadoPoliza, ModalidadGarantia, Poliza, TipoPoliza
+from app.schemas.solicitud import SolicitudCreate, generar_numero_radicado
 
 router = APIRouter(
     prefix="/solicitudes",
     tags=["Solicitudes (PMO — Borrador)"],
 )
 
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
-# ── Importa tus dependencias reales ──────────────────────────────
-# Descomenta y ajusta estos imports según tu estructura:
-#
-#   from app.core.database import get_db
-#   from app.models.poliza  import Poliza, EstadoPoliza
-#   from app.schemas.solicitud import (
-#       SolicitudCreate, SolicitudResponse, generar_numero_radicado
-#   )
+# Mapeo tipo_garantia (PMO) → TipoPoliza (modelo)
+_TIPO_MAP: dict[str, TipoPoliza] = {
+    "POLIZA_CUMPLIMIENTO": TipoPoliza.CUMPLIMIENTO,
+    "POLIZA_ANTICIPO":     TipoPoliza.CORRECTO_MANEJO,
+    "POLIZA_CALIDAD":      TipoPoliza.CALIDAD_SERVICIO,
+    "GARANTIA_BANCARIA":   TipoPoliza.OTRO,
+    "PAGARE":              TipoPoliza.OTRO,
+}
 
 
-@router.post(
-    "",
-    response_model=None,      # Cambia a SolicitudResponse cuando importes el schema
-    status_code=status.HTTP_201_CREATED,
-    summary="Crear solicitud inicial (PMO)",
-    description=(
-        "Crea una póliza en estado BORRADOR con los datos mínimos que PMO ingresa. "
-        "No requiere aseguradora, contratista ni número de póliza. "
-        "Retorna el ID y número de radicado para mostrar el ticket de confirmación."
-    ),
-)
-async def crear_solicitud(
-    data: dict,           # Reemplaza con: data: SolicitudCreate
-    db: AsyncSession = Depends(lambda: None),   # Reemplaza con: Depends(get_db)
-):
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def crear_solicitud(data: SolicitudCreate, db: DbSession):
     """
-    ╔══════════════════════════════════════════════════════════╗
-    ║  CÓDIGO LISTO PARA COPIAR — ajusta los 3 imports reales ║
-    ╚══════════════════════════════════════════════════════════╝
+    Crea una póliza en estado BORRADOR a partir de la solicitud PMO.
 
-    Reemplaza este docstring por el código de abajo una vez que
-    tengas los imports reales de tu proyecto.
+    Los campos que PMO no conoce aún (aseguradora, contratista, número de póliza
+    definitivo) se completan con valores temporales; el área jurídica los actualiza
+    en los pasos siguientes del flujo.
     """
-    pass
+    hoy = date.today()
 
+    # Las FK aseguradora_id y contratista_id son NOT NULL en el modelo.
+    # Usamos el primer registro disponible como placeholder para BORRADOR.
+    aseg = (await db.execute(select(Aseguradora).limit(1))).scalar_one_or_none()
+    cont = (await db.execute(select(Contratista).limit(1))).scalar_one_or_none()
+    if not aseg or not cont:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "No hay aseguradoras o contratistas registrados. "
+                "Ejecute POST /api/v1/seed/demo primero para cargar datos de demo."
+            ),
+        )
 
-# ════════════════════════════════════════════════════════════════════
-# CÓDIGO REAL DEL ENDPOINT — copia esto dentro de `crear_solicitud`
-# una vez que tengas los imports configurados.
-# ════════════════════════════════════════════════════════════════════
-"""
-IMPLEMENTACIÓN REAL (pega esto en tu archivo con los imports correctos):
+    tipo = _TIPO_MAP.get(data.tipo_garantia, TipoPoliza.OTRO)
 
-@router.post("", response_model=SolicitudResponse, status_code=201)
-async def crear_solicitud(
-    data: SolicitudCreate,
-    db: AsyncSession = Depends(get_db),
-):
-    # 1. Crear el objeto ORM con solo los campos que PMO llena
-    nueva_poliza = Poliza(
-        descripcion      = data.descripcion,
-        tipo_garantia    = data.tipo_garantia,
-        enlace_nextcloud = data.enlace_nextcloud,
-        monto_asegurado  = data.monto_asegurado,
-        estado           = EstadoPoliza.BORRADOR,      # ← Siempre BORRADOR al crear
-        # Campos obligatorios en la DB pero opcionales en este flujo:
-        numero_poliza    = None,
-        vigencia_desde   = None,
-        vigencia_hasta   = None,
-        aseguradora_id   = None,
-        contratista_id   = None,
+    # numero_poliza requiere ser único; ponemos un placeholder con timestamp
+    # que se reemplazará justo abajo con el radicado basado en el id asignado.
+    ts = int(datetime.now(tz=timezone.utc).timestamp())
+    poliza = Poliza(
+        numero_poliza=f"BOR-{ts}",
+        tipo=tipo,
+        modalidad=ModalidadGarantia.POLIZA_SEGURO,
+        estado=EstadoPoliza.BORRADOR,
+        vigencia_desde=hoy,
+        vigencia_hasta=hoy + timedelta(days=365),
+        valor_asegurado=data.monto_asegurado or Decimal("0"),
+        objeto_contrato=data.descripcion,
+        notas_internas=f"[PMO] Enlace NextCloud: {data.enlace_nextcloud}",
+        aseguradora_id=aseg.id,
+        contratista_id=cont.id,
+        alertas_enviadas=0,
     )
-
-    db.add(nueva_poliza)
-
-    # 2. flush() para que la DB asigne el id sin cerrar la transacción
+    db.add(poliza)
+    # flush para que la DB asigne el id sin cerrar la transacción
     await db.flush()
 
-    # 3. Generar el número de radicado con el id ya asignado
-    nueva_poliza.numero_radicado = generar_numero_radicado(nueva_poliza.id)
+    # Ahora que tenemos el id, actualizamos numero_poliza al formato de radicado
+    numero_radicado = generar_numero_radicado(poliza.id)
+    poliza.numero_poliza = numero_radicado
 
-    # 4. Commit definitivo
+    # Crear el checklist de expedición asociado (igual que en seed.py)
+    db.add(ChecklistExpedicion(poliza_id=poliza.id))
+
     await db.commit()
-    await db.refresh(nueva_poliza)
+    await db.refresh(poliza)
 
-    return nueva_poliza
+    # Devolvemos un dict en lugar de serializar el ORM directamente porque
+    # SolicitudResponse espera campos (descripcion, tipo_garantia, enlace_nextcloud)
+    # que no existen como columnas en el modelo Poliza.
+    return {
+        "id":               poliza.id,
+        "numero_radicado":  numero_radicado,
+        "descripcion":      data.descripcion,
+        "tipo_garantia":    data.tipo_garantia,
+        "enlace_nextcloud": data.enlace_nextcloud,
+        "monto_asegurado":  float(data.monto_asegurado) if data.monto_asegurado else None,
+        "estado":           poliza.estado.value,
+        "created_at":       poliza.created_at.isoformat(),
+    }
 
 
-@router.get("/{solicitud_id}", response_model=SolicitudResponse)
-async def obtener_solicitud(
-    solicitud_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
+@router.get("/{solicitud_id}")
+async def obtener_solicitud(solicitud_id: int, db: DbSession):
+    poliza = (await db.execute(
         select(Poliza).where(Poliza.id == solicitud_id)
-    )
-    poliza = result.scalar_one_or_none()
-    if not poliza:
+    )).scalar_one_or_none()
+
+    if poliza is None:
         raise HTTPException(
-            status_code=404,
-            detail=f"Solicitud {solicitud_id} no encontrada."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Solicitud con ID {solicitud_id} no encontrada.",
         )
-    return poliza
-"""
 
-
-# ════════════════════════════════════════════════════════════════════
-# MANEJO DE ERRORES 422 — middleware de respuesta legible
-# Agrega esto en main.py para que el frontend vea los detalles del
-# error de validación en lugar de un objeto críptico.
-# ════════════════════════════════════════════════════════════════════
-"""
-# En main.py:
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request, exc):
-    errores = []
-    for error in exc.errors():
-        campo = " → ".join(str(loc) for loc in error["loc"] if loc != "body")
-        errores.append({
-            "campo":   campo or "body",
-            "mensaje": error["msg"],
-            "valor":   str(error.get("input", ""))[:100],
-        })
-    return JSONResponse(
-        status_code=422,
-        content={
-            "detail":  "Error de validación en los datos enviados.",
-            "errores": errores,
-        },
-    )
-"""
+    return {
+        "id":               poliza.id,
+        "numero_radicado":  poliza.numero_poliza,
+        "descripcion":      poliza.objeto_contrato or "",
+        "tipo_garantia":    poliza.tipo.value if poliza.tipo else "",
+        "enlace_nextcloud": poliza.notas_internas or "",
+        "monto_asegurado":  float(poliza.valor_asegurado) if poliza.valor_asegurado else None,
+        "estado":           poliza.estado.value,
+        "created_at":       poliza.created_at.isoformat(),
+    }

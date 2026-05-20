@@ -75,7 +75,7 @@ async def listar_aseguradoras(
 @router.get("/corredores", response_model=list[CorredorResponse])
 async def listar_corredores(db: AsyncSession = Depends(get_db)):
     # Estados que consideramos como "Activos" para el contador de la tarjeta
-    estados_activos = [EstadoPoliza.ACTIVA, EstadoPoliza.POR_VENCER, EstadoPoliza.EMITIDA]
+    estados_activos = [EstadoPoliza.ACTIVA, EstadoPoliza.POR_VENCER]
 
     # Subquery para total de pólizas
     subq_total = (
