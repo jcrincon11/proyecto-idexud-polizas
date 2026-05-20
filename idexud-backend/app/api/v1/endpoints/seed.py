@@ -17,7 +17,7 @@ from app.api.deps import get_db
 from app.core.config import settings
 from app.models.aseguradora import Aseguradora
 from app.models.contratista import Contratista, TipoContratista
-from app.models.poliza import EstadoPoliza, ModalidadGarantia, Poliza, TipoPoliza
+from app.models.poliza import EstadoCartera, EstadoPoliza, ModalidadGarantia, Poliza, TipoPoliza
 from app.models.checklist import ChecklistExpedicion
 
 router = APIRouter(prefix="/seed", tags=["Demo / Seed"])
@@ -65,74 +65,108 @@ CONTRATISTAS_DEMO = [
 def _polizas_demo(aseg_ids: list[int], cont_ids: list[int]) -> list[dict]:
     """Genera pólizas con diferentes estados y umbrales de vencimiento."""
     return [
-        # 1. Activa — vence en 45 días (amarilla)
+        # 1. Activa — vence en 45 días | cartera: pendiente reintegro
         dict(numero_poliza="CU-2024-00134", tipo=TipoPoliza.CUMPLIMIENTO,
              vigencia_desde=HOY - timedelta(days=320), vigencia_hasta=HOY + timedelta(days=45),
              valor_asegurado=Decimal("15000000"), valor_prima=Decimal("450000"),
              porcentaje_cobertura=Decimal("10"), valor_contrato=Decimal("150000000"),
              numero_contrato="IDEXUD-2024-0042",
              objeto_contrato="Prestación de servicios de desarrollo de software",
-             estado=EstadoPoliza.ACTIVA, aseguradora_id=aseg_ids[0], contratista_id=cont_ids[0]),
-        # 2. Por vencer — 5 días (naranja)
+             estado=EstadoPoliza.ACTIVA, aseguradora_id=aseg_ids[0], contratista_id=cont_ids[0],
+             centro_costo_solicitante="CC-310 · Rectoría",
+             centro_costo_pagador="CC-001 · IDEXUD",
+             estado_cartera=EstadoCartera.PENDIENTE_REINTEGRO),
+        # 2. Por vencer — 5 días | cartera: abonado
         dict(numero_poliza="RCE-2024-088", tipo=TipoPoliza.RCE,
              vigencia_desde=HOY - timedelta(days=360), vigencia_hasta=HOY + timedelta(days=5),
              valor_asegurado=Decimal("80000000"), valor_prima=Decimal("960000"),
              numero_contrato="IDEXUD-2024-0018",
              objeto_contrato="Construcción de laboratorio de informática",
-             estado=EstadoPoliza.POR_VENCER, aseguradora_id=aseg_ids[1], contratista_id=cont_ids[1]),
-        # 3. Vencida — venció hace 4 días (roja)
+             estado=EstadoPoliza.POR_VENCER, aseguradora_id=aseg_ids[1], contratista_id=cont_ids[1],
+             centro_costo_solicitante="CC-420 · Facultad de Ingeniería",
+             centro_costo_pagador="CC-001 · IDEXUD",
+             estado_cartera=EstadoCartera.ABONADO,
+             orden_pago_numero="OP-2024-0531",
+             orden_pago_fecha=HOY - timedelta(days=30)),
+        # 3. Vencida — venció hace 4 días | cartera: pagado
         dict(numero_poliza="CU-2023-018", tipo=TipoPoliza.CUMPLIMIENTO,
              vigencia_desde=HOY - timedelta(days=369), vigencia_hasta=HOY - timedelta(days=4),
              valor_asegurado=Decimal("45000000"), valor_prima=Decimal("675000"),
              porcentaje_cobertura=Decimal("10"), valor_contrato=Decimal("450000000"),
              numero_contrato="IDEXUD-2023-0090",
-             estado=EstadoPoliza.VENCIDA, aseguradora_id=aseg_ids[2], contratista_id=cont_ids[2]),
-        # 4. Activa — vence en 240 días (verde)
+             estado=EstadoPoliza.VENCIDA, aseguradora_id=aseg_ids[2], contratista_id=cont_ids[2],
+             centro_costo_solicitante="CC-215 · Ciencias y Educación",
+             centro_costo_pagador="CC-001 · IDEXUD",
+             estado_cartera=EstadoCartera.PAGADO,
+             orden_pago_numero="OP-2023-1102",
+             orden_pago_fecha=HOY - timedelta(days=200)),
+        # 4. Activa — vence en 240 días | cartera: pendiente reintegro
         dict(numero_poliza="PS-2024-077", tipo=TipoPoliza.PAGO_SALARIOS,
              vigencia_desde=HOY - timedelta(days=125), vigencia_hasta=HOY + timedelta(days=240),
              valor_asegurado=Decimal("12500000"),
              numero_contrato="IDEXUD-2024-0055",
              objeto_contrato="Consultoría en transformación digital",
-             estado=EstadoPoliza.ACTIVA, aseguradora_id=aseg_ids[3], contratista_id=cont_ids[4]),
-        # 5. Borrador — recién creada
+             estado=EstadoPoliza.ACTIVA, aseguradora_id=aseg_ids[3], contratista_id=cont_ids[4],
+             centro_costo_solicitante="CC-512 · Tecnológica",
+             centro_costo_pagador="CC-001 · IDEXUD",
+             estado_cartera=EstadoCartera.PENDIENTE_REINTEGRO),
+        # 5. Borrador — recién creada | sin cartera aún
         dict(numero_poliza="CU-2025-001", tipo=TipoPoliza.CUMPLIMIENTO,
              vigencia_desde=HOY, vigencia_hasta=HOY + timedelta(days=365),
              valor_asegurado=Decimal("25000000"), valor_prima=Decimal("750000"),
              porcentaje_cobertura=Decimal("10"), valor_contrato=Decimal("250000000"),
              numero_contrato="IDEXUD-2025-0001",
              estado=EstadoPoliza.BORRADOR, aseguradora_id=aseg_ids[0], contratista_id=cont_ids[5]),
-        # 6. Activa — RCE vigente 10 días (rojo)
+        # 6. Activa — RCE vigente 10 días | cartera: abonado
         dict(numero_poliza="RCE-2024-112", tipo=TipoPoliza.RCE,
              vigencia_desde=HOY - timedelta(days=355), vigencia_hasta=HOY + timedelta(days=10),
              valor_asegurado=Decimal("200000000"), valor_prima=Decimal("2400000"),
              numero_contrato="IDEXUD-2024-0031",
              objeto_contrato="Obra civil — remodelación aulas bloque C",
-             estado=EstadoPoliza.POR_VENCER, aseguradora_id=aseg_ids[4], contratista_id=cont_ids[1]),
-        # 7. Activa — Estabilidad Obra
+             estado=EstadoPoliza.POR_VENCER, aseguradora_id=aseg_ids[4], contratista_id=cont_ids[1],
+             centro_costo_solicitante="CC-318 · Medio Ambiente",
+             centro_costo_pagador="CC-001 · IDEXUD",
+             estado_cartera=EstadoCartera.ABONADO,
+             orden_pago_numero="OP-2024-0219",
+             orden_pago_fecha=HOY - timedelta(days=15)),
+        # 7. Activa — Estabilidad Obra | cartera: pagado
         dict(numero_poliza="EO-2023-044", tipo=TipoPoliza.ESTABILIDAD_OBRA,
              vigencia_desde=HOY - timedelta(days=400), vigencia_hasta=HOY + timedelta(days=1825),
              valor_asegurado=Decimal("350000000"),
              numero_contrato="IDEXUD-2023-0055",
              objeto_contrato="Construcción y adecuación edificio administrativo",
-             estado=EstadoPoliza.ACTIVA, aseguradora_id=aseg_ids[1], contratista_id=cont_ids[1]),
-        # 8. Activa — Pago salarios
+             estado=EstadoPoliza.ACTIVA, aseguradora_id=aseg_ids[1], contratista_id=cont_ids[1],
+             centro_costo_solicitante="CC-601 · Artes ASAB",
+             centro_costo_pagador="CC-001 · IDEXUD",
+             estado_cartera=EstadoCartera.PAGADO,
+             orden_pago_numero="OP-2023-0887",
+             orden_pago_fecha=HOY - timedelta(days=380)),
+        # 8. Activa — Pago salarios | cartera: pendiente reintegro
         dict(numero_poliza="PS-2024-033", tipo=TipoPoliza.PAGO_SALARIOS,
              vigencia_desde=HOY - timedelta(days=200), vigencia_hasta=HOY + timedelta(days=165),
              valor_asegurado=Decimal("8000000"),
              numero_contrato="IDEXUD-2024-0022",
-             estado=EstadoPoliza.ACTIVA, aseguradora_id=aseg_ids[2], contratista_id=cont_ids[3]),
-        # 9. Pendiente revisión
+             estado=EstadoPoliza.ACTIVA, aseguradora_id=aseg_ids[2], contratista_id=cont_ids[3],
+             centro_costo_solicitante="CC-113 · Ingeniería",
+             centro_costo_pagador="CC-001 · IDEXUD",
+             estado_cartera=EstadoCartera.PENDIENTE_REINTEGRO),
+        # 9. Pendiente revisión | sin datos de cartera aún
         dict(numero_poliza="CU-2025-002", tipo=TipoPoliza.CUMPLIMIENTO,
              vigencia_desde=HOY - timedelta(days=5), vigencia_hasta=HOY + timedelta(days=360),
              valor_asegurado=Decimal("18000000"), valor_prima=Decimal("540000"),
              numero_contrato="IDEXUD-2025-0003",
              estado=EstadoPoliza.PENDIENTE_REVISION, aseguradora_id=aseg_ids[3], contratista_id=cont_ids[0]),
-        # 10. Renovada
+        # 10. Renovada | cartera: pagado
         dict(numero_poliza="CU-2023-099-R", tipo=TipoPoliza.CUMPLIMIENTO,
              vigencia_desde=HOY - timedelta(days=730), vigencia_hasta=HOY - timedelta(days=366),
              valor_asegurado=Decimal("20000000"),
              numero_contrato="IDEXUD-2023-0012",
-             estado=EstadoPoliza.RENOVADA, aseguradora_id=aseg_ids[0], contratista_id=cont_ids[2]),
+             estado=EstadoPoliza.RENOVADA, aseguradora_id=aseg_ids[0], contratista_id=cont_ids[2],
+             centro_costo_solicitante="CC-410 · Sistemas",
+             centro_costo_pagador="CC-001 · IDEXUD",
+             estado_cartera=EstadoCartera.PAGADO,
+             orden_pago_numero="OP-2022-0445",
+             orden_pago_fecha=HOY - timedelta(days=700)),
     ]
 
 

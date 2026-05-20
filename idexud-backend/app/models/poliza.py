@@ -82,6 +82,17 @@ class ModalidadGarantia(str, PyEnum):
     OTRO = "OTRO"
 
 
+class EstadoCartera(str, PyEnum):
+    """
+    Estado de la gestión financiera/reintegro de la prima entre
+    el centro de costos solicitante e IDEXUD como pagador.
+    """
+    PENDIENTE_REINTEGRO = "PENDIENTE_REINTEGRO"  # IDEXUD pagó, aún no recibe el reintegro
+    ABONADO = "ABONADO"                          # Reintegro parcial recibido
+    PAGADO = "PAGADO"                            # Reintegro completo, cuenta saldada
+    NO_APLICA = "NO_APLICA"                      # La póliza no genera reintegro
+
+
 # ---------------------------------------------------------------------------
 # Modelo principal
 # ---------------------------------------------------------------------------
@@ -212,6 +223,37 @@ class Poliza(Base):
     notas_internas: Mapped[str | None] = mapped_column(
         Text, nullable=True,
         comment="Observaciones internas del área jurídica / Idexud"
+    )
+
+    # ------------------------------------------------------------------
+    # Cartera — seguimiento financiero del reintegro de la prima
+    # (campos añadidos en migración d15e0db15bee)
+    # ------------------------------------------------------------------
+    centro_costo_solicitante: Mapped[str | None] = mapped_column(
+        String(100), nullable=True,
+        comment="ID/Código del proyecto que solicitó la póliza"
+    )
+    centro_costo_pagador: Mapped[str | None] = mapped_column(
+        String(100), nullable=True,
+        comment="ID/Código del fondo IDEXUD de donde salió la plata"
+    )
+    estado_cartera: Mapped[EstadoCartera | None] = mapped_column(
+        Enum(EstadoCartera, name="estadocarteraenum"),
+        nullable=True,
+        index=True,
+        comment="Estado de la deuda con IDEXUD"
+    )
+    orden_pago_numero: Mapped[str | None] = mapped_column(
+        String(50), nullable=True,
+        comment="Número de la Orden de Pago"
+    )
+    orden_pago_fecha: Mapped[date | None] = mapped_column(
+        Date, nullable=True,
+        comment="Fecha de la Orden de Pago"
+    )
+    enlace_soporte_pago: Mapped[str | None] = mapped_column(
+        String(500), nullable=True,
+        comment="Link de Nextcloud con la documentación financiera"
     )
 
     # ------------------------------------------------------------------

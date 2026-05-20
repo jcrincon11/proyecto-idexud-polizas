@@ -120,9 +120,10 @@ def run_migrations_online() -> None:
         # Verificar conectividad antes de proceder
         connection.execute(text("SELECT 1"))
         logger.info(
-            "✅ Conexión a PostgreSQL establecida: %s/%s",
+            "✅ Conexión a PostgreSQL establecida: %s:%s/%s",
             settings.POSTGRES_HOST,
-            settings.POSTGRES_DB,
+            settings.POSTGRES_PORT,
+            settings.POSTGRES_DB or "idexud_polizas",
         )
 
         context.configure(

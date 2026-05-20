@@ -12,6 +12,7 @@ from app.models.poliza import (                          # noqa: F401
     Poliza,
     TipoPoliza,
     EstadoPoliza,
+    EstadoCartera,
     ModalidadGarantia,
 )
 from app.models.siniestro import Siniestro, EstadoSiniestro  # noqa: F401
@@ -26,6 +27,7 @@ __all__ = [
     "Poliza",
     "TipoPoliza",
     "EstadoPoliza",
+    "EstadoCartera",
     "ModalidadGarantia",
     "Siniestro",
     "EstadoSiniestro",

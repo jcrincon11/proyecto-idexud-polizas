@@ -25,7 +25,7 @@ import { carteraApi } from '../services/api';
 
 // ─── BANDERA DE MODO ──────────────────────────────────────────────────────────
 // Cambiar a false para conectar la API real.
-const USE_MOCK = true;
+const USE_MOCK = false;
 
 // ─── DATOS ESTÁTICOS DE DEMO ──────────────────────────────────────────────────
 // Se usan únicamente cuando USE_MOCK = true.
