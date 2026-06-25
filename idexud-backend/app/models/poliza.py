@@ -36,6 +36,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.aseguradora import Aseguradora
     from app.models.contratista import Contratista
+    from app.models.corredor import Corredor
     from app.models.siniestro import Siniestro
     from app.models.checklist import ChecklistExpedicion
     from app.models.alerta import AlertaVencimiento
@@ -182,6 +183,13 @@ class Poliza(Base):
         index=True,
     )
 
+    corredor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("corredores.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Corredor de seguros que intermedió esta póliza"
+    )
+
     # Póliza que reemplaza a esta (para renovaciones)
     poliza_anterior_id: Mapped[int | None] = mapped_column(
         ForeignKey("polizas.id", ondelete="SET NULL"),
@@ -223,6 +231,10 @@ class Poliza(Base):
     notas_internas: Mapped[str | None] = mapped_column(
         Text, nullable=True,
         comment="Observaciones internas del área jurídica / Idexud"
+    )
+    modificado_por: Mapped[str | None] = mapped_column(
+        String(150), nullable=True,
+        comment="Nombre/email del usuario que realizó la última modificación"
     )
 
     # ------------------------------------------------------------------
@@ -274,6 +286,9 @@ class Poliza(Base):
     )
     contratista: Mapped["Contratista"] = relationship(
         "Contratista", back_populates="polizas"
+    )
+    corredor: Mapped["Corredor | None"] = relationship(
+        "Corredor", back_populates="polizas"
     )
     poliza_anterior: Mapped["Poliza | None"] = relationship(
         "Poliza", remote_side="Poliza.id", foreign_keys=[poliza_anterior_id]

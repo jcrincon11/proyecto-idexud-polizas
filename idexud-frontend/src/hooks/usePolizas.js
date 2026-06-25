@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+
 import { polizasApi } from '../services/api';
 
 const POR_PAGINA = 20;
@@ -62,11 +63,20 @@ export function usePolizas(filtrosIniciales = {}) {
 export function usePolizaStats() {
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    polizasApi.stats()
-      .then(({ data }) => setStats(data))
-      .catch(() => setStats(null))
-      .finally(() => setLoading(false));
+
+  const fetchStats = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await polizasApi.stats();
+      setStats(data);
+    } catch {
+      setStats(null);
+    } finally {
+      setLoading(false);
+    }
   }, []);
-  return { stats, loading };
+
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  return { stats, loading, refetch: fetchStats };
 }

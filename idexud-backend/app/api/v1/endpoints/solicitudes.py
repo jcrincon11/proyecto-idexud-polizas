@@ -4,8 +4,9 @@ app/api/v1/endpoints/solicitudes.py
 Flujo PMO — crea una póliza en estado BORRADOR con los datos mínimos.
 
 Endpoints:
-  POST /solicitudes       → PMO crea solicitud inicial
-  GET  /solicitudes/{id}  → Consultar una solicitud por ID
+  GET  /solicitudes           → Lista todas las solicitudes PMO
+  POST /solicitudes           → PMO crea solicitud inicial (genera código comprobante)
+  GET  /solicitudes/{id}      → Consultar una solicitud por ID
 """
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -15,12 +16,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import CurrentUser, get_db
 from app.models.aseguradora import Aseguradora
 from app.models.checklist import ChecklistExpedicion
 from app.models.contratista import Contratista
 from app.models.poliza import EstadoPoliza, ModalidadGarantia, Poliza, TipoPoliza
-from app.schemas.solicitud import SolicitudCreate, generar_numero_radicado
+from app.schemas.solicitud import (
+    SolicitudCreate,
+    SolicitudResponse,
+    extraer_notas_pmo,
+    generar_codigo_comprobante,
+    generar_numero_radicado,
+)
 
 router = APIRouter(
     prefix="/solicitudes",
@@ -38,20 +45,75 @@ _TIPO_MAP: dict[str, TipoPoliza] = {
     "PAGARE":              TipoPoliza.OTRO,
 }
 
+_TIPO_LABEL: dict[str, str] = {
+    "POLIZA_CUMPLIMIENTO": "Póliza de Cumplimiento",
+    "POLIZA_ANTICIPO":     "Póliza de Anticipo",
+    "POLIZA_CALIDAD":      "Póliza de Calidad",
+    "GARANTIA_BANCARIA":   "Garantía Bancaria",
+    "PAGARE":              "Pagaré",
+}
+
+
+def _poliza_a_dict(poliza: Poliza) -> dict:
+    """Convierte un ORM Poliza (creado por PMO) al formato SolicitudResponse."""
+    enlace, codigo, centro = extraer_notas_pmo(poliza.notas_internas)
+    return {
+        "id":                 poliza.id,
+        "numero_radicado":    poliza.numero_poliza,
+        "codigo_comprobante": codigo or f"REQ-PMO-{poliza.id:06d}",
+        "descripcion":        poliza.objeto_contrato or "",
+        "tipo_garantia":      poliza.tipo.value if poliza.tipo else "",
+        "enlace_nextcloud":   enlace,
+        "valor_contrato":     float(poliza.valor_contrato) if poliza.valor_contrato else None,
+        "centro_costos":      centro or None,
+        "estado":             poliza.estado.value,
+        "creado_por":         poliza.modificado_por,
+        "created_at":         poliza.created_at.isoformat(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# GET /solicitudes — Listar todas las solicitudes PMO
+# ═══════════════════════════════════════════════════════════════════
+
+@router.get("", status_code=status.HTTP_200_OK)
+async def listar_solicitudes(db: DbSession):
+    """
+    Retorna todas las pólizas creadas por el flujo PMO
+    (identificadas por número de radicado con prefijo SOL-).
+    Ordenadas de más reciente a más antigua.
+    """
+    stmt = (
+        select(Poliza)
+        .where(Poliza.numero_poliza.like("SOL-%"))
+        .order_by(Poliza.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    polizas = result.scalars().all()
+    return [_poliza_a_dict(p) for p in polizas]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# POST /solicitudes — Crear solicitud PMO
+# ═══════════════════════════════════════════════════════════════════
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def crear_solicitud(data: SolicitudCreate, db: DbSession):
+async def crear_solicitud(
+    data: SolicitudCreate,
+    db: DbSession,
+    current_user: CurrentUser,
+):
     """
     Crea una póliza en estado BORRADOR a partir de la solicitud PMO.
+    Genera automáticamente:
+      - numero_radicado: SOL-{año}-{id:05d}
+      - codigo_comprobante: REQ-PMO-XXXXXX  (6 chars aleatorios A-Z0-9)
 
-    Los campos que PMO no conoce aún (aseguradora, contratista, número de póliza
-    definitivo) se completan con valores temporales; el área jurídica los actualiza
-    en los pasos siguientes del flujo.
+    El código comprobante se almacena en notas_internas junto al enlace NextCloud.
     """
     hoy = date.today()
 
-    # Las FK aseguradora_id y contratista_id son NOT NULL en el modelo.
-    # Usamos el primer registro disponible como placeholder para BORRADOR.
+    # FK aseguradora_id y contratista_id son NOT NULL → placeholder para BORRADOR
     aseg = (await db.execute(select(Aseguradora).limit(1))).scalar_one_or_none()
     cont = (await db.execute(select(Contratista).limit(1))).scalar_one_or_none()
     if not aseg or not cont:
@@ -65,8 +127,10 @@ async def crear_solicitud(data: SolicitudCreate, db: DbSession):
 
     tipo = _TIPO_MAP.get(data.tipo_garantia, TipoPoliza.OTRO)
 
-    # numero_poliza requiere ser único; ponemos un placeholder con timestamp
-    # que se reemplazará justo abajo con el radicado basado en el id asignado.
+    # Generar el código comprobante ANTES de persistir (se guarda en notas_internas)
+    codigo_comprobante = generar_codigo_comprobante()
+
+    # Placeholder único de numero_poliza; se reemplaza con el radicado tras flush
     ts = int(datetime.now(tz=timezone.utc).timestamp())
     poliza = Poliza(
         numero_poliza=f"BOR-{ts}",
@@ -75,43 +139,51 @@ async def crear_solicitud(data: SolicitudCreate, db: DbSession):
         estado=EstadoPoliza.BORRADOR,
         vigencia_desde=hoy,
         vigencia_hasta=hoy + timedelta(days=365),
-        valor_asegurado=data.monto_asegurado or Decimal("0"),
+        valor_asegurado=Decimal("0"),
+        valor_contrato=data.valor_contrato or Decimal("0"),
         objeto_contrato=data.descripcion,
-        notas_internas=f"[PMO] Enlace NextCloud: {data.enlace_nextcloud}",
+        notas_internas=(
+            f"[PMO] Enlace NextCloud: {data.enlace_nextcloud}\n"
+            f"[COMPROBANTE] {codigo_comprobante}"
+            + (f"\n[CENTRO_COSTOS] {data.centro_costos}" if data.centro_costos else "")
+        ),
         aseguradora_id=aseg.id,
         contratista_id=cont.id,
         alertas_enviadas=0,
+        modificado_por=current_user["email"],
     )
     db.add(poliza)
-    # flush para que la DB asigne el id sin cerrar la transacción
-    await db.flush()
+    await db.flush()  # obtiene el ID sin cerrar transacción
 
-    # Ahora que tenemos el id, actualizamos numero_poliza al formato de radicado
+    # Actualizar numero_poliza al formato de radicado definitivo
     numero_radicado = generar_numero_radicado(poliza.id)
     poliza.numero_poliza = numero_radicado
 
-    # Crear el checklist de expedición asociado (igual que en seed.py)
     db.add(ChecklistExpedicion(poliza_id=poliza.id))
-
     await db.commit()
     await db.refresh(poliza)
 
-    # Devolvemos un dict en lugar de serializar el ORM directamente porque
-    # SolicitudResponse espera campos (descripcion, tipo_garantia, enlace_nextcloud)
-    # que no existen como columnas en el modelo Poliza.
     return {
-        "id":               poliza.id,
-        "numero_radicado":  numero_radicado,
-        "descripcion":      data.descripcion,
-        "tipo_garantia":    data.tipo_garantia,
-        "enlace_nextcloud": data.enlace_nextcloud,
-        "monto_asegurado":  float(data.monto_asegurado) if data.monto_asegurado else None,
-        "estado":           poliza.estado.value,
-        "created_at":       poliza.created_at.isoformat(),
+        "id":                 poliza.id,
+        "numero_radicado":    numero_radicado,
+        "codigo_comprobante": codigo_comprobante,
+        "descripcion":        data.descripcion,
+        "tipo_garantia":      data.tipo_garantia,
+        "tipo_garantia_label": _TIPO_LABEL.get(data.tipo_garantia, data.tipo_garantia),
+        "enlace_nextcloud":   data.enlace_nextcloud,
+        "valor_contrato":     float(data.valor_contrato) if data.valor_contrato else None,
+        "centro_costos":      data.centro_costos or None,
+        "estado":             poliza.estado.value,
+        "creado_por":         current_user["email"],
+        "created_at":         poliza.created_at.isoformat(),
     }
 
 
-@router.get("/{solicitud_id}")
+# ═══════════════════════════════════════════════════════════════════
+# GET /solicitudes/{id} — Obtener solicitud por ID
+# ═══════════════════════════════════════════════════════════════════
+
+@router.get("/{solicitud_id}", status_code=status.HTTP_200_OK)
 async def obtener_solicitud(solicitud_id: int, db: DbSession):
     poliza = (await db.execute(
         select(Poliza).where(Poliza.id == solicitud_id)
@@ -123,13 +195,4 @@ async def obtener_solicitud(solicitud_id: int, db: DbSession):
             detail=f"Solicitud con ID {solicitud_id} no encontrada.",
         )
 
-    return {
-        "id":               poliza.id,
-        "numero_radicado":  poliza.numero_poliza,
-        "descripcion":      poliza.objeto_contrato or "",
-        "tipo_garantia":    poliza.tipo.value if poliza.tipo else "",
-        "enlace_nextcloud": poliza.notas_internas or "",
-        "monto_asegurado":  float(poliza.valor_asegurado) if poliza.valor_asegurado else None,
-        "estado":           poliza.estado.value,
-        "created_at":       poliza.created_at.isoformat(),
-    }
+    return _poliza_a_dict(poliza)

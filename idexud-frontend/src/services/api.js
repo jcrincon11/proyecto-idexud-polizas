@@ -26,13 +26,28 @@ const api = axios.create({
   },
 });
 
-// ── Interceptor de REQUEST: adjuntar JWT ─────────────────────────────────────
+// ── Interceptor de REQUEST: adjuntar credenciales ────────────────────────────
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('idexud_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    const apiKey = import.meta.env.VITE_API_KEY;
+    if (apiKey) {
+      config.headers['X-API-Key'] = apiKey;
+    }
+
+    // ── DEBUG (remover en producción) ─────────────────────────────────────────
+    console.log(
+      `[API] ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`,
+      '\n  X-API-Key presente:', !!config.headers['X-API-Key'],
+      '\n  VITE_API_KEY definida:', !!import.meta.env.VITE_API_KEY,
+      '\n  headers completos:', JSON.stringify(config.headers),
+    );
+    // ─────────────────────────────────────────────────────────────────────────
+
     return config;
   },
   (error) => Promise.reject(error),
@@ -83,7 +98,8 @@ export const polizasApi = {
   listar: (params) => api.get('/polizas/', { params }),
   obtener: (id) => api.get(`/polizas/${id}`),
   crear: (body) => api.post('/polizas/', body),
-  actualizar: (id, body) => api.patch(`/polizas/${id}`, body),
+  actualizar: (id, body) => api.put(`/polizas/${id}`, body),
+  eliminar: (id) => api.delete(`/polizas/${id}`),
   anular: (id, motivo) => api.delete(`/polizas/${id}`, { params: { motivo } }),
   stats: () => api.get('/polizas/dashboard/stats'),
 };
@@ -96,8 +112,9 @@ export const schedulerApi = {
 };
 
 export const aseguradorasApi = {
-  listar: () => api.get('/aseguradoras/'),
+  listar: () => api.get('/aseguradoras'),
   crear: (body) => api.post('/aseguradoras/', body),
+  eliminar: (id) => api.delete(`/aseguradoras/${id}`),
 };
 
 export const contratistasApi = {
@@ -114,10 +131,35 @@ export const checklistApi = {
 };
 
 export const carteraApi = {
-  // GET /cartera/?estado=PAGADO&busqueda=...
   listar:     (params)      => api.get('/cartera/', { params }),
-  // GET /cartera/:id
+  resumen:    ()            => api.get('/cartera/resumen'),
   obtener:    (id)          => api.get(`/cartera/${id}`),
-  // PATCH /cartera/:id  — solo los campos que cambian (estado, OP, fecha, enlace)
   actualizar: (id, cambios) => api.patch(`/cartera/${id}`, cambios),
+};
+
+export const corredoresApi = {
+  listar: (params) => api.get('/corredores', { params }),
+  crear: (body) => api.post('/corredores', body),
+};
+
+export const solicitudesApi = {
+  listar: () => api.get('/solicitudes'),
+  crear: (body) => api.post('/solicitudes', body),
+  obtener: (id) => api.get(`/solicitudes/${id}`),
+};
+
+// TODO: Conectar motor de alertas — implementar cuando el ingeniero de TI
+//       configure el scheduler y el servicio SMTP/Twilio (ver notificaciones_interface.py).
+export const alertasApi = {
+  listar: (params) => api.get('/alertas/', { params }),
+  stats:  ()       => api.get('/alertas/stats'),
+};
+
+export const siexudApi = {
+  sincronizar: () => api.post('/sincronizar'),
+};
+
+export const proyectosApi = {
+  listar: (params) => api.get('/proyectos', { params }),
+  opciones: (q) => api.get('/proyectos/opciones', { params: q ? { q } : {} }),
 };

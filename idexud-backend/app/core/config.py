@@ -17,8 +17,13 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
 
-    # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "*"]
+    # Seguridad — API Key para operaciones de escritura (POST/PATCH/DELETE).
+    # Cambiar por un valor largo y aleatorio antes de pasar a producción.
+    # Generar con: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    API_KEY: str = "CAMBIAR-EN-PRODUCCION-usar-secrets.token_urlsafe-32"
+
+    # CORS — nunca colocar "*" en producción; lista los orígenes del frontend real.
+    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
     @property
     def is_development(self) -> bool:

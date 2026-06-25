@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import CurrentUser, get_db
 from app.models.checklist import ChecklistExpedicion
 from app.models.poliza import Poliza
 from app.schemas.checklist import ChecklistResponse, PolizaChecklistUpdate
@@ -38,6 +38,17 @@ CAMPOS_CON_FECHA = {
     "paso8_supervisor_notificado": "paso8_fecha",
     "paso9_incluida_cartera":      "paso9_fecha",
     "paso10_archivada":            "paso10_fecha",
+}
+
+# Campos que tienen un campo _responsable paralelo — se puebla con el email del usuario autenticado
+# TODO: Integrar con servicio de Auth — cuando el JWT esté activo, current_user["email"]
+#       contendrá el email real del usuario que marcó el paso.
+CAMPOS_CON_RESPONSABLE = {
+    "paso1_solicitud_recibida":  "paso1_responsable",
+    "paso2_docs_verificados":    "paso2_responsable",
+    "paso3_borrador_revisado":   "paso3_responsable",
+    "paso4_aprobada_juridica":   "paso4_responsable",
+    "paso7_ingresada_sistema":   "paso7_responsable",
 }
 
 
@@ -90,6 +101,7 @@ async def actualizar_checklist(
     poliza_id: int,
     payload:   PolizaChecklistUpdate,
     db:        DbSession,
+    current_user: CurrentUser,  # TODO: Integrar con servicio de Auth
 ) -> ChecklistResponse:
     checklist = await _get_checklist_o_404(poliza_id, db)
     ahora     = datetime.now(tz=timezone.utc)
@@ -105,25 +117,28 @@ async def actualizar_checklist(
         valor_actual = getattr(checklist, campo, None)
         setattr(checklist, campo, valor)
 
-        # Auto-timestamp: si un boolean pasa False→True, fijar la _fecha
+        # Auto-timestamp + responsable: si un boolean pasa False→True
         if (
-            campo in CAMPOS_CON_FECHA
-            and isinstance(valor, bool)
+            isinstance(valor, bool)
             and valor is True
-            and not valor_actual   # solo si antes era False/None
+            and not valor_actual
         ):
-            campo_fecha = CAMPOS_CON_FECHA[campo]
-            setattr(checklist, campo_fecha, ahora)
+            if campo in CAMPOS_CON_FECHA:
+                setattr(checklist, CAMPOS_CON_FECHA[campo], ahora)
+            if campo in CAMPOS_CON_RESPONSABLE:
+                # TODO: Integrar con servicio de Auth — email real vendrá del JWT
+                setattr(checklist, CAMPOS_CON_RESPONSABLE[campo], current_user["email"])
 
-        # Si se desmarca (True→False), limpiar la fecha
+        # Si se desmarca (True→False), limpiar fecha y responsable
         if (
-            campo in CAMPOS_CON_FECHA
-            and isinstance(valor, bool)
+            isinstance(valor, bool)
             and valor is False
             and valor_actual is True
         ):
-            campo_fecha = CAMPOS_CON_FECHA[campo]
-            setattr(checklist, campo_fecha, None)
+            if campo in CAMPOS_CON_FECHA:
+                setattr(checklist, CAMPOS_CON_FECHA[campo], None)
+            if campo in CAMPOS_CON_RESPONSABLE:
+                setattr(checklist, CAMPOS_CON_RESPONSABLE[campo], None)
 
     await db.commit()
     await db.refresh(checklist)

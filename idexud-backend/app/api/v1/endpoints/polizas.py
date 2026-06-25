@@ -26,7 +26,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db
+from app.api.deps import CurrentUser, get_db
 from app.models.poliza import EstadoPoliza, TipoPoliza
 from app.schemas.poliza import (
     PolizaCreate,
@@ -81,6 +81,9 @@ async def listar_polizas(
     contratista_id: Annotated[
         int | None, Query(gt=0, description="ID del contratista.")
     ] = None,
+    corredor_id: Annotated[
+        int | None, Query(gt=0, description="ID del corredor intermediario.")
+    ] = None,
     numero_contrato: Annotated[
         str | None,
         Query(description="Buscar por número de contrato (búsqueda parcial)."),
@@ -121,6 +124,7 @@ async def listar_polizas(
         estado=estado,
         aseguradora_id=aseguradora_id,
         contratista_id=contratista_id,
+        corredor_id=corredor_id,
         numero_contrato=numero_contrato,
         vence_antes_de=vence_antes_de,
         vence_despues_de=vence_despues_de,
@@ -146,9 +150,10 @@ async def listar_polizas(
 async def crear_poliza(
     payload: PolizaCreate,
     db: DbSession,
+    current_user: CurrentUser,  # TODO: Integrar con servicio de Auth
 ) -> PolizaResponseDetalle:
     service = PolizaService(db)
-    return await service.crear(payload)
+    return await service.crear(payload, modificado_por=current_user["email"])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -171,12 +176,14 @@ async def obtener_stats_dashboard(db: DbSession) -> dict:
     Agrega estadísticas en una sola llamada para alimentar las tarjetas
     del dashboard sin múltiples requests desde el frontend.
     """
+    from datetime import timedelta
     from sqlalchemy import func, select
     from app.models.poliza import Poliza
 
     hoy = date.today()
+    limite_30 = hoy + timedelta(days=30)
 
-    # Conteos por estado
+    # Conteos por estado almacenado (para historial / breakdown)
     stmt_estados = (
         select(Poliza.estado, func.count(Poliza.id).label("cantidad"))
         .group_by(Poliza.estado)
@@ -184,38 +191,73 @@ async def obtener_stats_dashboard(db: DbSession) -> dict:
     resultado_estados = await db.execute(stmt_estados)
     conteos_estado = {row.estado.value: row.cantidad for row in resultado_estados}
 
-    # Valor total asegurado de pólizas activas
-    from sqlalchemy import cast
-    from sqlalchemy import Numeric as SaNumeric
+    # ── Conteos basados en fecha real (para las tarjetas del dashboard) ────────
+
+    # TOTAL: todas las pólizas en el sistema
+    total_polizas = (await db.execute(select(func.count(Poliza.id)))).scalar_one()
+
+    # ACTIVAS: vigencia_hasta >= hoy
+    activas = (await db.execute(
+        select(func.count(Poliza.id)).where(
+            Poliza.vigencia_hasta.isnot(None),
+            Poliza.vigencia_hasta >= hoy,
+        )
+    )).scalar_one()
+
+    # POR VENCER: hoy <= vigencia_hasta <= hoy + 30 días
+    por_vencer = (await db.execute(
+        select(func.count(Poliza.id)).where(
+            Poliza.vigencia_hasta.isnot(None),
+            Poliza.vigencia_hasta >= hoy,
+            Poliza.vigencia_hasta <= limite_30,
+        )
+    )).scalar_one()
+
+    # VENCIDAS: vigencia_hasta < hoy
+    vencidas = (await db.execute(
+        select(func.count(Poliza.id)).where(
+            Poliza.vigencia_hasta.isnot(None),
+            Poliza.vigencia_hasta < hoy,
+        )
+    )).scalar_one()
+
+    # Valor total asegurado de pólizas no vencidas
     stmt_valor = select(
         func.coalesce(func.sum(Poliza.valor_asegurado), 0)
-    ).where(Poliza.estado.in_([EstadoPoliza.ACTIVA, EstadoPoliza.POR_VENCER]))
+    ).where(
+        Poliza.vigencia_hasta.isnot(None),
+        Poliza.vigencia_hasta >= hoy,
+    )
     valor_total = (await db.execute(stmt_valor)).scalar_one()
 
     # Pólizas críticas: vencen en los próximos 7 días
-    limite_critico = date.fromordinal(hoy.toordinal() + 7)
-    stmt_criticas = select(func.count(Poliza.id)).where(
-        Poliza.vigencia_hasta >= hoy,
-        Poliza.vigencia_hasta <= limite_critico,
-        Poliza.estado.in_([EstadoPoliza.ACTIVA, EstadoPoliza.POR_VENCER]),
-    )
-    criticas = (await db.execute(stmt_criticas)).scalar_one()
+    limite_critico = hoy + timedelta(days=7)
+    criticas = (await db.execute(
+        select(func.count(Poliza.id)).where(
+            Poliza.vigencia_hasta.isnot(None),
+            Poliza.vigencia_hasta >= hoy,
+            Poliza.vigencia_hasta <= limite_critico,
+        )
+    )).scalar_one()
 
     # Pólizas próximas: vencen entre 8 y 30 días
-    limite_proximo = date.fromordinal(hoy.toordinal() + 30)
-    stmt_proximas = select(func.count(Poliza.id)).where(
-        Poliza.vigencia_hasta > limite_critico,
-        Poliza.vigencia_hasta <= limite_proximo,
-        Poliza.estado.in_([EstadoPoliza.ACTIVA, EstadoPoliza.POR_VENCER]),
-    )
-    proximas = (await db.execute(stmt_proximas)).scalar_one()
+    proximas = (await db.execute(
+        select(func.count(Poliza.id)).where(
+            Poliza.vigencia_hasta.isnot(None),
+            Poliza.vigencia_hasta > limite_critico,
+            Poliza.vigencia_hasta <= limite_30,
+        )
+    )).scalar_one()
 
     from app.schemas.base import format_cop
     from decimal import Decimal
 
     return {
+        "total_polizas": total_polizas,
+        "activas": activas,
+        "por_vencer": por_vencer,
+        "vencidas": vencidas,
         "resumen_por_estado": conteos_estado,
-        "total_polizas": sum(conteos_estado.values()),
         "valor_total_asegurado_cop": float(valor_total),
         "valor_total_asegurado_fmt": format_cop(Decimal(str(valor_total))) or "$ 0,00",
         "alertas": {
@@ -265,37 +307,54 @@ async def actualizar_poliza(
     poliza_id: int,
     payload: PolizaUpdate,
     db: DbSession,
+    current_user: CurrentUser,  # TODO: Integrar con servicio de Auth
 ) -> PolizaResponseDetalle:
     service = PolizaService(db)
-    return await service.actualizar(poliza_id, payload)
+    return await service.actualizar(poliza_id, payload, modificado_por=current_user["email"])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# DELETE /polizas/{poliza_id} — Anular (eliminación lógica)
+# PUT /polizas/{poliza_id} — Actualizar completamente (admin)
+# ═════════════════════════════════════════════════════════════════════════════
+
+@router.put(
+    "/{poliza_id}",
+    response_model=PolizaResponseDetalle,
+    summary="Actualizar póliza (panel de administración)",
+    description=(
+        "Actualiza los campos enviados de la póliza indicada. "
+        "Pensado para el formulario de edición del administrador: "
+        "envía todos los campos del formulario y actualiza los que cambiaron."
+    ),
+)
+async def actualizar_poliza_put(
+    poliza_id: int,
+    payload: PolizaUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> PolizaResponseDetalle:
+    service = PolizaService(db)
+    return await service.actualizar(poliza_id, payload, modificado_por=current_user["email"])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# DELETE /polizas/{poliza_id} — Borrado físico (hard delete)
 # ═════════════════════════════════════════════════════════════════════════════
 
 @router.delete(
     "/{poliza_id}",
-    response_model=PolizaResponse,
-    summary="Anular póliza",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Eliminar póliza (borrado físico)",
     description=(
-        "Marca la póliza como ANULADA (no se elimina físicamente). "
-        "La trazabilidad y el historial de la póliza se conservan por requisitos "
-        "de auditoría de la contratación pública colombiana. "
-        "Se requiere un motivo de anulación obligatorio."
+        "Elimina físicamente la póliza y todos sus registros asociados "
+        "(checklist, siniestros, alertas) de la base de datos. "
+        "Esta operación es irreversible. Solo disponible para administradores."
     ),
 )
-async def anular_poliza(
+async def eliminar_poliza(
     poliza_id: int,
     db: DbSession,
-    motivo: Annotated[
-        str,
-        Query(
-            min_length=10,
-            max_length=500,
-            description="Motivo de la anulación (mínimo 10 caracteres).",
-        ),
-    ],
-) -> PolizaResponse:
+    current_user: CurrentUser,
+) -> None:
     service = PolizaService(db)
-    return await service.anular(poliza_id, motivo)
+    await service.eliminar_fisicamente(poliza_id)

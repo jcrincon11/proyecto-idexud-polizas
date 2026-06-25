@@ -16,7 +16,8 @@ from pydantic import (
 )
 from pydantic.functional_validators import AfterValidator
 
-from app.models.poliza import EstadoPoliza, ModalidadGarantia, TipoPoliza
+from app.models.poliza import EstadoCartera, EstadoPoliza, ModalidadGarantia, TipoPoliza
+from app.schemas.corredor import CorredorResumen  # noqa: F401 — re-exportado
 from app.schemas.base import (
     CopAmount,
     Porcentaje,
@@ -101,7 +102,7 @@ class PolizaBase(SchemaBase):
     modalidad: ModalidadGarantia = Field(default=ModalidadGarantia.POLIZA_SEGURO)
     vigencia_desde: date
     vigencia_hasta: date
-    valor_asegurado: CopAmount
+    valor_asegurado: CopAmount | None = None
     valor_prima: CopAmount | None = None
     porcentaje_cobertura: Porcentaje | None = None
     numero_contrato: str | None = Field(default=None, max_length=100)
@@ -113,6 +114,7 @@ class PolizaBase(SchemaBase):
     notas_internas: str | None = Field(default=None, max_length=5000)
     aseguradora_id: int = Field(..., gt=0)
     contratista_id: int = Field(..., gt=0)
+    corredor_id: int | None = Field(default=None, gt=0)
     poliza_anterior_id: int | None = Field(default=None, gt=0)
 
     @field_validator("numero_poliza")
@@ -132,9 +134,9 @@ class PolizaBase(SchemaBase):
 
     @field_validator("valor_asegurado")
     @classmethod
-    def valor_asegurado_minimo(cls, v: Decimal) -> Decimal:
-        if v < Decimal("1000"):
-            raise ValueError("El mínimo aceptado es $ 1.000 COP.")
+    def valor_asegurado_minimo(cls, v: Decimal | None) -> Decimal | None:
+        if v is not None and v < Decimal("0"):
+            raise ValueError("El valor asegurado no puede ser negativo.")
         return v
 
     @model_validator(mode="after")
@@ -174,12 +176,15 @@ class PolizaUpdate(SchemaBase):
     numero_adicion: str | None = Field(default=None, max_length=50)
     aseguradora_id: int | None = Field(default=None, gt=0)
     contratista_id: int | None = Field(default=None, gt=0)
+    corredor_id: int | None = Field(default=None, gt=0)
     poliza_anterior_id: int | None = Field(default=None, gt=0)
     fecha_radicacion: date | None = None
     fecha_aprobacion: date | None = None
     aprobado_por: str | None = Field(default=None, max_length=150)
     requiere_acta_inicio: bool | None = None
     notas_internas: str | None = Field(default=None, max_length=5000)
+    centro_costo_solicitante: str | None = Field(default=None, max_length=100)
+    enlace_soporte_pago: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def vigencias_coherentes_si_presentes(self) -> "PolizaUpdate":
@@ -211,6 +216,12 @@ class PolizaResponse(SchemaBase):
     numero_adicion: str | None = None
     aseguradora_id: int | None = None
     contratista_id: int | None = None
+    corredor_id: int | None = None
+    contratista: ContratistaResumen | None = None
+    modificado_por: str | None = None
+    centro_costo_solicitante: str | None = None
+    centro_costo_pagador: str | None = None
+    estado_cartera: EstadoCartera | None = None
     poliza_anterior_id: int | None = None
     fecha_radicacion: date | None = None
     fecha_aprobacion: date | None = None
@@ -218,6 +229,8 @@ class PolizaResponse(SchemaBase):
     requiere_acta_inicio: bool
     alertas_enviadas: int | None = 0
     notas_internas: str | None = None
+    enlace_soporte_pago: str | None = None
+    checklist: ChecklistResumen | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -317,6 +330,7 @@ class PolizaResponse(SchemaBase):
 class PolizaResponseDetalle(PolizaResponse):
     aseguradora: AseguradoraResumen | None = None
     contratista: ContratistaResumen | None = None
+    corredor: CorredorResumen | None = None
     siniestros: list[SiniestroResumen] = Field(default_factory=list)
     checklist: ChecklistResumen | None = None
 

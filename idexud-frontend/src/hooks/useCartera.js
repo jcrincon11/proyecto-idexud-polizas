@@ -170,3 +170,55 @@ export function useCartera() {
 
   return { cartera, loading, error, actualizarRegistro, refetch };
 }
+
+// ─── HOOK: RESUMEN FINANCIERO POR CORREDOR ────────────────────────────────────
+/**
+ * Llama a GET /cartera/resumen y devuelve el listado de ítems por corredor
+ * junto con el gran total de la cartera.
+ *
+ * Contrato:
+ *   const { resumen, totales, loading, error, refetch } = useCarteraResumen();
+ *
+ *   resumen  → CarteraResumenItem[]   uno por corredor
+ *   totales  → { pendiente, abonado, pagado, total, pctPagado }
+ *   loading  → boolean
+ *   error    → string | null
+ */
+export function useCarteraResumen() {
+  const [data,    setData]    = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+
+  const refetch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: resp } = await carteraApi.resumen();
+      setData(resp);
+    } catch (err) {
+      setError(err.mensajeUsuario ?? 'No se pudo cargar el resumen de cartera.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refetch(); }, [refetch]);
+
+  const totales = data
+    ? {
+        pendiente: data.gran_total_pendiente,
+        abonado:   data.gran_total_abonado,
+        pagado:    data.gran_total_pagado,
+        total:     data.gran_total_cartera,
+        pctPagado: data.gran_pct_pagado,
+      }
+    : { pendiente: 0, abonado: 0, pagado: 0, total: 0, pctPagado: 0 };
+
+  return {
+    resumen: data?.items ?? [],
+    totales,
+    loading,
+    error,
+    refetch,
+  };
+}

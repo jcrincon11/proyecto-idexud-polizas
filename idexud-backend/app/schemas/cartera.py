@@ -8,9 +8,11 @@ registra si IDEXUD ya recibió el reintegro de la prima por parte del
 centro de costos solicitante.
 
 Exporta:
-  CarteraResponse  → respuesta de GET /cartera/ y PATCH /cartera/{id}
-  CarteraUpdate    → body de PATCH /cartera/{id}
-  CarteraListResponse → envuelve la lista paginada
+  CarteraResponse       → respuesta de GET /cartera/ y PATCH /cartera/{id}
+  CarteraUpdate         → body de PATCH /cartera/{id}
+  CarteraListResponse   → envuelve la lista paginada
+  CarteraResumenItem    → agregado financiero por corredor
+  CarteraResumenResponse → envuelve el listado de resúmenes con gran total
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from pydantic import Field
+from pydantic import Field, computed_field
 
 from app.models.poliza import EstadoCartera
 from app.schemas.base import SchemaBase
@@ -26,6 +28,10 @@ from app.schemas.base import SchemaBase
 if TYPE_CHECKING:
     from app.models.poliza import Poliza
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CARTERA CRUD
+# ══════════════════════════════════════════════════════════════════════════════
 
 class CarteraResponse(SchemaBase):
     """Proyección de una póliza enfocada en los datos de cartera."""
@@ -66,7 +72,10 @@ class CarteraUpdate(SchemaBase):
     """
     Body de PATCH /cartera/{id}.
     Solo se actualiza lo que el cliente envía (PATCH semántico).
-    Todos los campos son opcionales.
+    La validación de campos obligatorios para PAGADO se realiza en el endpoint,
+    donde se pueden combinar los valores del payload con los ya guardados en BD.
+    Esto evita rechazar un PATCH válido del tipo {"estado_cartera": "PAGADO"}
+    cuando orden_pago_numero ya fue registrado en una operación anterior.
     """
     estado_cartera:           EstadoCartera | None = None
     orden_pago_numero:        str | None = Field(None, max_length=50)
@@ -82,3 +91,69 @@ class CarteraListResponse(SchemaBase):
     total: int
     pagina: int = 1
     por_pagina: int = 50
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESUMEN FINANCIERO POR CORREDOR
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CarteraResumenItem(SchemaBase):
+    """
+    Agregado financiero de cartera para un corredor.
+    Generado por GET /cartera/resumen.
+    """
+    corredor_id:      int | None = None
+    corredor_nombre:  str = "Sin corredor"
+    corredor_empresa: str = "—"
+    total_polizas:    int = 0
+    total_pendiente:  Decimal = Decimal("0")
+    total_abonado:    Decimal = Decimal("0")
+    total_pagado:     Decimal = Decimal("0")
+
+    @computed_field
+    @property
+    def total_cartera(self) -> Decimal:
+        """Suma de los tres estados (excluye NO_APLICA que no entra en el resumen)."""
+        return self.total_pendiente + self.total_abonado + self.total_pagado
+
+    @computed_field
+    @property
+    def pct_pagado(self) -> float:
+        """% del total que ya fue pagado (0–100)."""
+        total = float(self.total_cartera)
+        if total == 0:
+            return 0.0
+        return round(float(self.total_pagado) / total * 100, 1)
+
+    @computed_field
+    @property
+    def pct_gestionado(self) -> float:
+        """% del total ya gestionado (abonado + pagado)."""
+        total = float(self.total_cartera)
+        if total == 0:
+            return 0.0
+        return round(float(self.total_abonado + self.total_pagado) / total * 100, 1)
+
+
+class CarteraResumenResponse(SchemaBase):
+    """
+    Respuesta de GET /cartera/resumen.
+    Lista de ítems por corredor + gran total de toda la cartera.
+    """
+    items:               list[CarteraResumenItem]
+    gran_total_pendiente: Decimal = Decimal("0")
+    gran_total_abonado:   Decimal = Decimal("0")
+    gran_total_pagado:    Decimal = Decimal("0")
+
+    @computed_field
+    @property
+    def gran_total_cartera(self) -> Decimal:
+        return self.gran_total_pendiente + self.gran_total_abonado + self.gran_total_pagado
+
+    @computed_field
+    @property
+    def gran_pct_pagado(self) -> float:
+        total = float(self.gran_total_cartera)
+        if total == 0:
+            return 0.0
+        return round(float(self.gran_total_pagado) / total * 100, 1)

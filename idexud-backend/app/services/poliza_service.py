@@ -24,6 +24,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.poliza import EstadoPoliza, Poliza, TipoPoliza
 from app.models.checklist import ChecklistExpedicion
+from app.models.corredor import Corredor  # noqa: F401 — needed for eager load
 from app.schemas.poliza import (
     PolizaCreate,
     PolizaListResponse,
@@ -78,6 +79,7 @@ class PolizaService:
             .options(
                 selectinload(Poliza.aseguradora),
                 selectinload(Poliza.contratista),
+                selectinload(Poliza.corredor),
                 selectinload(Poliza.siniestros),
                 selectinload(Poliza.checklist),
                 selectinload(Poliza.alertas),
@@ -156,7 +158,11 @@ class PolizaService:
     # CREATE
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def crear(self, payload: PolizaCreate) -> PolizaResponseDetalle:
+    async def crear(
+        self,
+        payload: PolizaCreate,
+        modificado_por: str | None = None,  # TODO: Integrar con servicio de Auth — recibir current_user["email"]
+    ) -> PolizaResponseDetalle:
         """
         Crea una nueva póliza y su checklist de expedición vacío.
 
@@ -168,10 +174,34 @@ class PolizaService:
         """
         await self._verificar_numero_unico(payload.numero_poliza)
 
+        # Validar que la póliza anterior exista y su estado permita la renovación
+        # antes de persistir nada, para evitar un rollback costoso.
+        poliza_anterior_obj = None
+        if payload.poliza_anterior_id:
+            poliza_anterior_obj = await self.db.get(Poliza, payload.poliza_anterior_id)
+            if poliza_anterior_obj is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=(
+                        f"La póliza anterior con ID {payload.poliza_anterior_id} "
+                        "no existe en el sistema."
+                    ),
+                )
+            # Valida que la transición ESTADO_ACTUAL → RENOVADA sea válida según
+            # el diagrama de flujo definido en TRANSICIONES_VALIDAS.
+            self._validar_transicion_estado(
+                poliza_anterior_obj.estado, EstadoPoliza.RENOVADA
+            )
+
+        dump = payload.model_dump()
+        if dump.get("valor_asegurado") is None:
+            dump["valor_asegurado"] = Decimal("0")
+
         poliza = Poliza(
-            **payload.model_dump(),
+            **dump,
             estado=EstadoPoliza.BORRADOR,
             alertas_enviadas=0,
+            modificado_por=modificado_por,
         )
         self.db.add(poliza)
         await self.db.flush()  # Obtiene el ID sin hacer commit aún
@@ -179,6 +209,18 @@ class PolizaService:
         # Crear el checklist vacío asociado automáticamente
         checklist = ChecklistExpedicion(poliza_id=poliza.id)
         self.db.add(checklist)
+
+        # Marcar la póliza anterior como RENOVADA en el mismo commit atómico.
+        # Así nunca quedan dos pólizas activas para el mismo contrato.
+        if poliza_anterior_obj is not None:
+            poliza_anterior_obj.estado = EstadoPoliza.RENOVADA
+            poliza_anterior_obj.notas_internas = (
+                f"[RENOVADA] Reemplazada por la póliza '{poliza.numero_poliza}' "
+                f"(ID {poliza.id}).\n"
+                f"Nota anterior: {poliza_anterior_obj.notas_internas or '—'}"
+            )
+            if modificado_por:
+                poliza_anterior_obj.modificado_por = modificado_por
 
         await self.db.commit()
         await self.db.refresh(poliza)
@@ -211,6 +253,7 @@ class PolizaService:
         estado: EstadoPoliza | None = None,
         aseguradora_id: int | None = None,
         contratista_id: int | None = None,
+        corredor_id: int | None = None,
         numero_contrato: str | None = None,
         busqueda: str | None = None,       # Busca en numero_poliza y objeto_contrato
         vence_antes_de: date | None = None,
@@ -249,6 +292,9 @@ class PolizaService:
 
         if contratista_id:
             filtros.append(Poliza.contratista_id == contratista_id)
+
+        if corredor_id:
+            filtros.append(Poliza.corredor_id == corredor_id)
 
         if numero_contrato:
             filtros.append(
@@ -313,7 +359,10 @@ class PolizaService:
     # ──────────────────────────────────────────────────────────────────────────
 
     async def actualizar(
-        self, poliza_id: int, payload: PolizaUpdate
+        self,
+        poliza_id: int,
+        payload: PolizaUpdate,
+        modificado_por: str | None = None,  # TODO: Integrar con servicio de Auth — recibir current_user["email"]
     ) -> PolizaResponseDetalle:
         """
         Actualiza solo los campos presentes en el payload (PATCH semántico).
@@ -352,6 +401,9 @@ class PolizaService:
         for campo, valor in cambios.items():
             setattr(poliza, campo, valor)
 
+        if modificado_por:
+            poliza.modificado_por = modificado_por
+
         await self.db.commit()
 
         return PolizaResponseDetalle.model_validate(
@@ -362,7 +414,12 @@ class PolizaService:
     # DELETE — eliminación lógica (anulación)
     # ──────────────────────────────────────────────────────────────────────────
 
-    async def anular(self, poliza_id: int, motivo: str) -> PolizaResponse:
+    async def anular(
+        self,
+        poliza_id: int,
+        motivo: str,
+        modificado_por: str | None = None,  # TODO: Integrar con servicio de Auth — recibir current_user["email"]
+    ) -> PolizaResponse:
         """
         Anula una póliza (eliminación lógica, no borra el registro).
 
@@ -379,11 +436,30 @@ class PolizaService:
             f"[ANULADA] {motivo}\n"
             f"Nota anterior: {poliza.notas_internas or '—'}"
         )
+        if modificado_por:
+            poliza.modificado_por = modificado_por
 
         await self.db.commit()
         await self.db.refresh(poliza)
 
         return PolizaResponse.model_validate(poliza)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # DELETE — eliminación física (hard delete)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def eliminar_fisicamente(self, poliza_id: int) -> None:
+        """
+        Borra la póliza y sus dependientes directamente de PostgreSQL.
+
+        La cascada 'all, delete-orphan' definida en el modelo Poliza elimina
+        automáticamente: ChecklistExpedicion, Siniestro y AlertaVencimiento.
+        Las FK a Aseguradora, Contratista y Corredor solo se referencian
+        (ondelete=RESTRICT/SET NULL), por lo que esas tablas no se tocan.
+        """
+        poliza = await self._get_poliza_o_404(poliza_id)
+        await self.db.delete(poliza)
+        await self.db.commit()
 
     # ──────────────────────────────────────────────────────────────────────────
     # HELPERS DE NEGOCIO — usados por el scheduler de alertas

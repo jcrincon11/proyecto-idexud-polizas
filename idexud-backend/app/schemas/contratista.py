@@ -20,5 +20,7 @@ class ContratistaResponse(SchemaBase):
     tipo:                   TipoContratista
     nombre_razon_social:    str
     numero_identificacion:  str
-    email:                  str | None = None
+    # Campos requeridos por el Motor de Alertas para envío de notificaciones
+    email:                  str | None = None   # TODO: Conectar a servicio de mensajería — usado como destinatario_email
+    telefono:               str | None = None   # TODO: Conectar a servicio de mensajería — usado como destinatario_sms
     activo:                 bool

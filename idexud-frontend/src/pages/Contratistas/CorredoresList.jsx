@@ -1,5 +1,7 @@
 // src/pages/Corredores/CorredoresList.jsx
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { polizasApi } from "../../services/api";
+import DashboardHeader from "../../components/layout/DashboardHeader";
 
 const T = {
   indigo: "#1E1B4B", indigoMid: "#312E81", indigoLight: "#4338CA",
@@ -44,48 +46,93 @@ function StatBox({ valor, label, color }) {
 }
 
 function PolizasModal({ corredor, onCerrar }) {
-  // Simulación temporal de pólizas
-  const polizas = [
-    { id: 1, numero: "POL-2024-002", estado: "VIGENTE", aseguradora: "Seguros Sura", monto: "$ 450.000.000", vence: "2025-06-30" },
-    { id: 2, numero: "POL-2024-007", estado: "EMITIDA", aseguradora: "Allianz", monto: "$ 85.000.000", vence: "2025-09-15" },
-  ].slice(0, corredor.polizas_gestionadas || 2);
+  const [polizas, setPolizas] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError]     = useState(null);
+  const overlayRef = useRef(null);
 
-  const COL = { VIGENTE: { bg: "#D1FAE5", t: "#065F46" }, EMITIDA: { bg: "#DBEAFE", t: "#1D4ED8" }, BORRADOR: { bg: "#F1F5F9", t: "#475569" }, PAGADA: { bg: "#FEF3C7", t: "#92400E" } };
+  useEffect(() => {
+    let activo = true;
+    setCargando(true);
+    setError(null);
+    polizasApi
+      .listar({ corredor_id: corredor.id, por_pagina: 100 })
+      .then(({ data }) => { if (activo) { setPolizas(data.items ?? []); setCargando(false); } })
+      .catch(() => { if (activo) { setError("No se pudieron cargar las pólizas."); setCargando(false); } });
+    return () => { activo = false; };
+  }, [corredor.id]);
+
+  useEffect(() => {
+    const fn = (e) => e.key === "Escape" && onCerrar();
+    window.addEventListener("keydown", fn);
+    return () => window.removeEventListener("keydown", fn);
+  }, [onCerrar]);
+
+  const COL = {
+    ACTIVA:              { bg: "#D1FAE5", t: "#065F46" },
+    POR_VENCER:          { bg: "#FEF3C7", t: "#92400E" },
+    VENCIDA:             { bg: "#FEE2E2", t: "#991B1B" },
+    BORRADOR:            { bg: "#F1F5F9", t: "#475569" },
+    PENDIENTE_REVISION:  { bg: "#DBEAFE", t: "#1D4ED8" },
+    RENOVADA:            { bg: "#EDE9FE", t: "#5B21B6" },
+    ANULADA:             { bg: "#F1F5F9", t: "#6B7280" },
+  };
 
   return (
-    <div onClick={onCerrar} style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(11,25,41,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", animation: "fadeIn 0.2s ease" }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: T.white, borderRadius: "20px", width: "100%", maxWidth: "640px", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 40px 80px rgba(0,0,0,0.28)", animation: "slideUp 0.25s cubic-bezier(0.34,1.56,0.64,1)", overflow: "hidden" }}>
-        <div style={{ padding: "22px 28px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: "14px" }}>
+    <div ref={overlayRef} onClick={(e) => e.target === overlayRef.current && onCerrar()} style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(11,25,41,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", animation: "fadeIn 0.2s ease" }}>
+      <div style={{ background: T.white, borderRadius: "20px", width: "100%", maxWidth: "640px", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 40px 80px rgba(0,0,0,0.28)", animation: "slideUp 0.25s cubic-bezier(0.34,1.56,0.64,1)", overflow: "hidden" }}>
+        {/* Header */}
+        <div style={{ padding: "22px 28px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: "14px", flexShrink: 0 }}>
           <Logo nombre={corredor.nombre} dominio={corredor.dominio} size={42} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: "10px", color: T.slateLight, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" }}>Pólizas intermediadas</div>
+            <div style={{ fontSize: "10px", color: T.slateLight, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              Pólizas vinculadas {!cargando && `· ${polizas.length}`}
+            </div>
             <h2 style={{ margin: "2px 0 0", fontSize: "18px", fontWeight: 700, color: T.indigo }}>{corredor.nombre}</h2>
           </div>
           <button onClick={onCerrar} style={{ width: "30px", height: "30px", border: `1px solid ${T.border}`, borderRadius: "7px", background: "none", cursor: "pointer", color: T.slate, fontSize: "15px", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
         </div>
+
+        {/* Lista con scroll vertical */}
         <div style={{ overflowY: "auto", flex: 1, padding: "18px 28px" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "9px" }}>
-            {polizas.map(p => {
-              const c = COL[p.estado] || COL.BORRADOR;
-              return (
-                <div key={p.id} style={{ padding: "14px 16px", borderRadius: "11px", border: `1.5px solid ${T.border}`, display: "grid", gridTemplateColumns: "1fr auto", gap: "8px", alignItems: "center", transition: "border-color 0.15s" }} onMouseEnter={e => e.currentTarget.style.borderColor = T.violet} onMouseLeave={e => e.currentTarget.style.borderColor = T.border}>
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "3px" }}>
-                      <span style={{ fontSize: "13px", fontWeight: 700, color: T.indigo, fontFamily: "monospace" }}>{p.numero || "Sin número"}</span>
-                      <span style={{ padding: "2px 7px", borderRadius: "99px", background: c.bg, color: c.t, fontSize: "10px", fontWeight: 700 }}>{p.estado}</span>
+          {cargando ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {[1, 2, 3].map(i => (
+                <div key={i} style={{ height: "68px", borderRadius: "12px", background: "linear-gradient(90deg,#F1F5F9 25%,#E2E8F0 50%,#F1F5F9 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite" }} />
+              ))}
+            </div>
+          ) : error ? (
+            <div style={{ textAlign: "center", padding: "40px", color: T.red, fontSize: "14px" }}>{error}</div>
+          ) : polizas.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px", color: T.slateLight, fontSize: "15px" }}>
+              <div style={{ fontSize: "40px", marginBottom: "12px" }}>📋</div> No hay pólizas vinculadas aún.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "9px" }}>
+              {polizas.map(p => {
+                const c = COL[p.estado] ?? COL.BORRADOR;
+                return (
+                  <div key={p.id} style={{ padding: "14px 16px", borderRadius: "11px", border: `1.5px solid ${T.border}`, display: "grid", gridTemplateColumns: "1fr auto", gap: "8px", alignItems: "center", transition: "border-color 0.15s" }} onMouseEnter={e => e.currentTarget.style.borderColor = T.violet} onMouseLeave={e => e.currentTarget.style.borderColor = T.border}>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "3px" }}>
+                        <span style={{ fontSize: "13px", fontWeight: 700, color: T.indigo, fontFamily: "monospace" }}>{p.numero_poliza || "Sin número"}</span>
+                        <span style={{ padding: "2px 7px", borderRadius: "99px", background: c.bg, color: c.t, fontSize: "10px", fontWeight: 700 }}>{p.estado}</span>
+                      </div>
+                      <div style={{ fontSize: "12px", color: T.slate }}>{p.numero_contrato || p.objeto_contrato || "—"}</div>
                     </div>
-                    <div style={{ fontSize: "12px", color: T.slate }}>Aseguradora: {p.aseguradora}</div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: "13px", fontWeight: 700, color: T.indigo }}>{p.valor_asegurado_fmt || "—"}</div>
+                      <div style={{ fontSize: "11px", color: T.slateLight }}>Hasta {p.vigencia_hasta || "—"}</div>
+                    </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: "13px", fontWeight: 700, color: T.indigo }}>{p.monto || "—"}</div>
-                    <div style={{ fontSize: "11px", color: T.slateLight }}>{p.vence ? `Hasta ${p.vence}` : "Sin vigencia"}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
-        <div style={{ padding: "14px 28px 20px", borderTop: `1px solid ${T.border}`, display: "flex", justifyContent: "flex-end" }}>
+
+        {/* Footer */}
+        <div style={{ padding: "14px 28px 20px", borderTop: `1px solid ${T.border}`, display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
           <button onClick={onCerrar} style={{ padding: "8px 18px", border: `1.5px solid ${T.border}`, borderRadius: "9px", background: T.white, color: T.slate, fontSize: "13px", fontWeight: 500, cursor: "pointer" }}>Cerrar</button>
         </div>
       </div>
@@ -169,12 +216,17 @@ export default function CorredoresList({ onGuardar, onEliminar }) {
   return (
     <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "28px 24px", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
       <style>{`@keyframes fadeIn{from{opacity:0}to{opacity:1}} @keyframes slideUp{from{opacity:0;transform:translateY(20px) scale(0.97)}to{opacity:1;transform:translateY(0) scale(1)}} @keyframes cardIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}`}</style>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", marginBottom: "28px", flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ margin: "0 0 5px", fontSize: "30px", fontWeight: 800, color: T.indigo, letterSpacing: "-0.03em", lineHeight: 1.1 }}>Corredores</h1>
-          <p style={{ margin: 0, fontSize: "14px", color: T.slateLight }}>{corredores.length} intermediarios · <strong style={{ color: T.indigo }}>{total}</strong> pólizas gestionadas</p>
-        </div>
-      </div>
+      <DashboardHeader
+        title="Corredores"
+        subtitle="Intermediarios de seguros vinculados a las pólizas del IDEXUD."
+        breadcrumb="IDEXUD · Corredores"
+        accent="#8B5CF6"
+        accent2="#6366F1"
+        stats={[
+          { label: 'INTERMEDIARIOS', value: cargando ? null : corredores.length, desc: 'Corredores registrados' },
+          { label: 'PÓLIZAS',        value: cargando ? null : total,              desc: 'Gestionadas en total'  },
+        ]}
+      />
       <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: 1, minWidth: "220px" }}>
           <span style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", opacity: 0.45, fontSize: "15px" }}>🔍</span>

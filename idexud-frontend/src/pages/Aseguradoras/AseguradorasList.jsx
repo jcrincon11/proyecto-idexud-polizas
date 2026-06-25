@@ -1,5 +1,6 @@
 // src/pages/Aseguradoras/AseguradorasList.jsx
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import DashboardHeader from "../../components/layout/DashboardHeader";
 
 // ── Paleta de colores corporativa ──────────────────────────────────
 const TOKENS = {
@@ -72,19 +73,31 @@ function LogoAseguradora({ nombre, dominio, size = 52 }) {
   );
 }
 
-function PolizasModal({ entidad, tipo, onCerrar }) {
+const COLOR_ESTADO = {
+  BORRADOR:           { bg: "#F1F5F9", text: "#475569" },
+  PENDIENTE_REVISION: { bg: "#DBEAFE", text: "#1D4ED8" },
+  ACTIVA:             { bg: "#D1FAE5", text: "#065F46" },
+  POR_VENCER:         { bg: "#FEF3C7", text: "#92400E" },
+  VENCIDA:            { bg: "#FEE2E2", text: "#B91C1C" },
+  RENOVADA:           { bg: "#EDE9FE", text: "#5B21B6" },
+  ANULADA:            { bg: "#F1F5F9", text: "#94A3B8" },
+};
+
+function PolizasModal({ entidad, onCerrar }) {
   const [polizas, setPolizas] = useState([]);
   const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState(null);
   const overlayRef = useRef(null);
 
   useEffect(() => {
-    // Simulación mientras creamos el endpoint real de detalle
-    const demo = [
-      { id: 1, numero_poliza: "POL-2024-001", estado: "VIGENTE", descripcion: "Cumplimiento contrato obra civil sede norte", vigencia_hasta: "2025-12-31", monto_asegurado: "$ 850.000.000" },
-      { id: 2, numero_poliza: "POL-2024-003", estado: "PAGADA", descripcion: "Anticipo mantenimiento instalaciones", vigencia_hasta: "2025-03-15", monto_asegurado: "$ 120.000.000" },
-    ].filter((_, i) => i < (entidad.polizas_vinculadas || 2));
-
-    setTimeout(() => { setPolizas(demo); setCargando(false); }, 400);
+    let activo = true;
+    setCargando(true);
+    setError(null);
+    polizasApi
+      .listar({ aseguradora_id: entidad.id, por_pagina: 100 })
+      .then(({ data }) => { if (activo) { setPolizas(data.items ?? []); setCargando(false); } })
+      .catch(() => { if (activo) { setError("No se pudieron cargar las pólizas."); setCargando(false); } });
+    return () => { activo = false; };
   }, [entidad.id]);
 
   useEffect(() => {
@@ -93,29 +106,29 @@ function PolizasModal({ entidad, tipo, onCerrar }) {
     return () => window.removeEventListener("keydown", fn);
   }, [onCerrar]);
 
-  const COLOR_ESTADO = {
-    VIGENTE: { bg: "#D1FAE5", text: "#065F46" },
-    PAGADA: { bg: "#FEF3C7", text: "#92400E" },
-    BORRADOR: { bg: "#F1F5F9", text: "#475569" },
-    EMITIDA: { bg: "#DBEAFE", text: "#1D4ED8" },
-  };
-
   return (
     <div ref={overlayRef} onClick={(e) => e.target === overlayRef.current && onCerrar()} style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(11,25,41,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", animation: "fadeIn 0.2s ease" }}>
       <div style={{ background: TOKENS.white, borderRadius: "20px", width: "100%", maxWidth: "680px", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 40px 80px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.06)", animation: "slideUp 0.25s cubic-bezier(0.34,1.56,0.64,1)", overflow: "hidden" }}>
-        <div style={{ padding: "24px 28px 20px", borderBottom: `1px solid ${TOKENS.border}`, display: "flex", alignItems: "flex-start", gap: "16px" }}>
+        {/* Header */}
+        <div style={{ padding: "24px 28px 20px", borderBottom: `1px solid ${TOKENS.border}`, display: "flex", alignItems: "flex-start", gap: "16px", flexShrink: 0 }}>
           <LogoAseguradora nombre={entidad.nombre} dominio={entidad.dominio} size={44} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: "11px", color: TOKENS.slate, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "3px" }}>Pólizas vinculadas</div>
+            <div style={{ fontSize: "11px", color: TOKENS.slate, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "3px" }}>
+              Pólizas vinculadas {!cargando && `· ${polizas.length}`}
+            </div>
             <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: TOKENS.navy }}>{entidad.nombre}</h2>
           </div>
           <button onClick={onCerrar} style={{ width: "32px", height: "32px", borderRadius: "8px", border: `1px solid ${TOKENS.border}`, background: "none", cursor: "pointer", fontSize: "16px", color: TOKENS.slate, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
         </div>
+
+        {/* Lista con scroll */}
         <div style={{ overflowY: "auto", flex: 1, padding: "20px 28px" }}>
           {cargando ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {[1, 2].map(i => <div key={i} style={{ height: "72px", borderRadius: "12px", background: "linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 50%, #F1F5F9 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite" }} />)}
+              {[1, 2, 3].map(i => <div key={i} style={{ height: "72px", borderRadius: "12px", background: "linear-gradient(90deg, #F1F5F9 25%, #E2E8F0 50%, #F1F5F9 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite" }} />)}
             </div>
+          ) : error ? (
+            <div style={{ textAlign: "center", padding: "40px", color: TOKENS.red, fontSize: "14px" }}>{error}</div>
           ) : polizas.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px", color: TOKENS.slateLight, fontSize: "15px" }}>
               <div style={{ fontSize: "40px", marginBottom: "12px" }}>📋</div> No hay pólizas vinculadas aún.
@@ -123,7 +136,7 @@ function PolizasModal({ entidad, tipo, onCerrar }) {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               {polizas.map((p) => {
-                const colores = COLOR_ESTADO[p.estado] || COLOR_ESTADO.BORRADOR;
+                const colores = COLOR_ESTADO[p.estado] ?? COLOR_ESTADO.BORRADOR;
                 return (
                   <div key={p.id} style={{ padding: "16px", borderRadius: "12px", border: `1.5px solid ${TOKENS.border}`, display: "grid", gridTemplateColumns: "1fr auto", gap: "8px", alignItems: "center", transition: "border-color 0.15s" }} onMouseEnter={e => e.currentTarget.style.borderColor = TOKENS.gold} onMouseLeave={e => e.currentTarget.style.borderColor = TOKENS.border}>
                     <div>
@@ -131,11 +144,11 @@ function PolizasModal({ entidad, tipo, onCerrar }) {
                         <span style={{ fontSize: "13px", fontWeight: 700, color: TOKENS.navy, fontFamily: "monospace" }}>{p.numero_poliza || "Sin número"}</span>
                         <span style={{ padding: "2px 8px", borderRadius: "99px", background: colores.bg, color: colores.text, fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em" }}>{p.estado}</span>
                       </div>
-                      <div style={{ fontSize: "12px", color: TOKENS.slate }}>{p.descripcion}</div>
+                      <div style={{ fontSize: "12px", color: TOKENS.slate }}>{p.numero_contrato || p.objeto_contrato || "—"}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: "13px", fontWeight: 700, color: TOKENS.navy }}>{p.monto_asegurado || "—"}</div>
-                      <div style={{ fontSize: "11px", color: TOKENS.slateLight }}>Hasta {p.vigencia_hasta || "—"}</div>
+                      <div style={{ fontSize: "13px", fontWeight: 700, color: TOKENS.navy }}>{p.valor_asegurado_fmt || "—"}</div>
+                      <div style={{ fontSize: "11px", color: TOKENS.slateLight }}>Hasta {p.vigencia_hasta_fmt || "—"}</div>
                     </div>
                   </div>
                 );
@@ -143,7 +156,9 @@ function PolizasModal({ entidad, tipo, onCerrar }) {
             </div>
           )}
         </div>
-        <div style={{ padding: "16px 28px", borderTop: `1px solid ${TOKENS.border}`, display: "flex", justifyContent: "flex-end" }}>
+
+        {/* Footer */}
+        <div style={{ padding: "16px 28px", borderTop: `1px solid ${TOKENS.border}`, display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
           <button onClick={onCerrar} style={{ padding: "9px 20px", border: `1.5px solid ${TOKENS.border}`, borderRadius: "10px", background: TOKENS.white, color: TOKENS.slate, fontSize: "13px", fontWeight: 500, cursor: "pointer" }}>Cerrar</button>
         </div>
       </div>
@@ -151,9 +166,9 @@ function PolizasModal({ entidad, tipo, onCerrar }) {
   );
 }
 
-function FormModal({ aseguradora, onGuardar, onCerrar }) {
+function FormModal({ aseguradora, onGuardar, onCerrar, errorExterno }) {
   const esEdicion = !!aseguradora?.id;
-  const [form, setForm] = useState({ nombre: aseguradora?.nombre || "", nit: aseguradora?.nit || "", dominio: aseguradora?.dominio || "", telefono: aseguradora?.telefono || "", email: aseguradora?.email || "", contacto: aseguradora?.contacto || "" });
+  const [form, setForm] = useState({ nombre: aseguradora?.nombre || "", nit: aseguradora?.nit || "", dominio: aseguradora?.dominio || "", telefono: aseguradora?.contacto_telefono || "", email: aseguradora?.contacto_email || "", contacto: aseguradora?.contacto_nombre || "" });
   const [cargando, setCargando] = useState(false);
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
 
@@ -181,6 +196,11 @@ function FormModal({ aseguradora, onGuardar, onCerrar }) {
             </div>
           ))}
         </div>
+        {errorExterno && (
+          <div style={{ margin: "0 28px 8px", padding: "10px 14px", borderRadius: "10px", background: TOKENS.redPale, border: `1px solid #FECACA`, fontSize: "12px", color: TOKENS.red }}>
+            {errorExterno}
+          </div>
+        )}
         <div style={{ padding: "16px 28px 24px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>
           <button onClick={onCerrar} style={{ padding: "9px 20px", border: `1.5px solid ${TOKENS.border}`, borderRadius: "10px", background: TOKENS.white, color: TOKENS.slate, fontSize: "13px", fontWeight: 500, cursor: "pointer" }}>Cancelar</button>
           <button onClick={handleGuardar} disabled={cargando || !form.nombre.trim()} style={{ padding: "9px 24px", border: "none", borderRadius: "10px", background: cargando ? TOKENS.slate : TOKENS.navy, color: TOKENS.white, fontSize: "13px", fontWeight: 600, cursor: cargando ? "not-allowed" : "pointer" }}>{cargando ? "Guardando…" : esEdicion ? "Guardar cambios" : "Registrar"}</button>
@@ -207,9 +227,9 @@ function AseguradoraCard({ aseguradora, onVerPolizas, onEditar, onEliminar }) {
         </div>
         <div style={{ borderTop: `1.5px dashed ${TOKENS.border}`, margin: "0 0 14px" }} />
         <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginBottom: "16px" }}>
-          {aseguradora.contacto && <InfoFila icono="👤" valor={aseguradora.contacto} />}
-          {aseguradora.telefono && <InfoFila icono="📞" valor={aseguradora.telefono} href={`tel:${aseguradora.telefono}`} />}
-          {aseguradora.email && <InfoFila icono="✉️" valor={aseguradora.email} href={`mailto:${aseguradora.email}`} />}
+          {aseguradora.contacto_nombre && <InfoFila icono="👤" valor={aseguradora.contacto_nombre} />}
+          {aseguradora.contacto_telefono && <InfoFila icono="📞" valor={aseguradora.contacto_telefono} href={`tel:${aseguradora.contacto_telefono}`} />}
+          {aseguradora.contacto_email && <InfoFila icono="✉️" valor={aseguradora.contacto_email} href={`mailto:${aseguradora.contacto_email}`} />}
         </div>
         <div style={{ padding: "10px 14px", background: TOKENS.bg, borderRadius: "10px", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
           <div>
@@ -240,26 +260,28 @@ function InfoFila({ icono, valor, href }) {
   return href ? <a href={href} style={{ textDecoration: "none" }}>{content}</a> : content;
 }
 
-// ── COMPONENTE PRINCIPAL (CON BACKEND) ────────────────────────────
-export default function AseguradorasList({ onGuardar, onEliminar }) {
+// ── Import del cliente API centralizado ──────────────────────────
+import { aseguradorasApi, polizasApi } from "../../services/api";
+
+// ── COMPONENTE PRINCIPAL ───────────────────────────────────────────
+export default function AseguradorasList() {
   const [aseguradoras, setAseguradoras] = useState([]);
   const [cargando, setCargando] = useState(true);
+  const [errorGuardar, setErrorGuardar] = useState(null);
 
-  // FETCH AL BACKEND REAL
-  useEffect(() => {
-    const fetchAseguradoras = async () => {
-      try {
-        const res = await fetch("http://localhost:8000/api/v1/aseguradoras");
-        const data = await res.json();
-        setAseguradoras(data);
-      } catch (err) {
-        console.error("Error cargando aseguradoras:", err);
-      } finally {
-        setCargando(false);
-      }
-    };
-    fetchAseguradoras();
+  const fetchAseguradoras = useCallback(async () => {
+    setCargando(true);
+    try {
+      const { data } = await aseguradorasApi.listar();
+      setAseguradoras(data);
+    } catch (err) {
+      console.error("Error cargando aseguradoras:", err);
+    } finally {
+      setCargando(false);
+    }
   }, []);
+
+  useEffect(() => { fetchAseguradoras(); }, [fetchAseguradoras]);
 
   const [busqueda, setBusqueda] = useState("");
   const [orden, setOrden] = useState("polizas");
@@ -275,29 +297,96 @@ export default function AseguradorasList({ onGuardar, onEliminar }) {
   }, [aseguradoras, busqueda, orden]);
 
   const handleGuardar = useCallback(async (data) => {
-    await onGuardar?.(data);
-    setModalForm(null);
-  }, [onGuardar]);
+    setErrorGuardar(null);
+    try {
+      if (data.id) {
+        // Edición optimista local (sin PUT en backend aún)
+        setAseguradoras(prev => prev.map(a => a.id === data.id ? {
+          ...a,
+          nombre: data.nombre,
+          nit: data.nit,
+          dominio: data.dominio || null,
+          contacto_nombre: data.contacto || null,
+          contacto_email: data.email || null,
+          contacto_telefono: data.telefono || null,
+        } : a));
+      } else {
+        // Mapeo de nombres de campo del formulario → schema del backend
+        const payload = {
+          nombre: data.nombre,
+          nit: data.nit,
+          contacto_nombre: data.contacto || null,
+          contacto_email: data.email || null,
+          contacto_telefono: data.telefono || null,
+        };
+        const { data: nuevaAseguradora } = await aseguradorasApi.crear(payload);
+        // Preserva 'dominio' (solo frontend, no está en el modelo backend)
+        setAseguradoras(prev => [...prev, { ...nuevaAseguradora, dominio: data.dominio || null }]);
+      }
+      setModalForm(null);
+    } catch (err) {
+      // ── DEBUG EXHAUSTIVO ─────────────────────────────────────────────────────
+      console.error("--- ERROR DEBUG aseguradora ---");
+      console.error("Status:", err.response?.status);
+      console.error("Data:", err.response?.data);
+      console.error("Headers:", err.response?.headers);
+      console.error("Message:", err.message);
+      // ─────────────────────────────────────────────────────────────────────────
+
+      const detalle = err.response?.data?.detail;
+      const msg =
+        (typeof detalle === 'string' ? detalle : null)
+        ?? (Array.isArray(detalle) ? detalle.map(e => e.mensaje ?? e.msg).join(' | ') : null)
+        ?? err.mensajeUsuario
+        ?? err.message
+        ?? "Error desconocido al guardar.";
+
+      // alert temporal para debug (remover en producción)
+      // eslint-disable-next-line no-alert
+      alert("Error: " + JSON.stringify(err.response?.data ?? err.message ?? "sin respuesta"));
+
+      setErrorGuardar(msg);
+    }
+  }, [fetchAseguradoras]);
 
   const handleEliminar = useCallback(async (a) => {
-    if (window.confirm(`¿Eliminar ${a.nombre}? Esta acción no se puede deshacer.`)) await onEliminar?.(a.id);
-  }, [onEliminar]);
+    if (!window.confirm(`¿Eliminar ${a.nombre}? Esta acción no se puede deshacer.`)) return;
+    try {
+      await aseguradorasApi.eliminar(a.id);
+      // Actualización local inmediata + refetch de confirmación
+      setAseguradoras(prev => prev.filter(x => x.id !== a.id));
+      fetchAseguradoras();
+    } catch (err) {
+      alert(err.mensajeUsuario ?? "No se pudo eliminar. Verifique que no tenga pólizas vinculadas.");
+    }
+  }, [fetchAseguradoras]);
 
   const totalPolizas = aseguradoras.reduce((s, a) => s + (a.polizas_vinculadas || 0), 0);
 
-  if (cargando) return <div style={{ padding: "40px", textAlign: "center", color: TOKENS.slate }}>Cargando Aseguradoras...</div>;
+  if (cargando && aseguradoras.length === 0) return <div style={{ padding: "40px", textAlign: "center", color: TOKENS.slate }}>Cargando Aseguradoras...</div>;
 
   return (
     <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "28px 24px", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
       <style>{`@keyframes fadeIn{from{opacity:0}to{opacity:1}} @keyframes slideUp{from{opacity:0;transform:translateY(20px) scale(0.97)}to{opacity:1;transform:translateY(0) scale(1)}} @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}} @keyframes cardIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}`}</style>
 
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", marginBottom: "28px", flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ margin: "0 0 5px", fontSize: "30px", fontWeight: 800, color: TOKENS.navy, letterSpacing: "-0.03em", lineHeight: 1.1 }}>Aseguradoras</h1>
-          <p style={{ margin: 0, fontSize: "14px", color: TOKENS.slateLight }}>{aseguradoras.length} entidades · <strong style={{ color: TOKENS.navy }}>{totalPolizas}</strong> pólizas en total</p>
-        </div>
-        <button onClick={() => setModalForm({})} style={{ padding: "10px 20px", border: "none", borderRadius: "11px", background: TOKENS.navy, color: TOKENS.white, fontSize: "13px", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: "7px", boxShadow: "0 4px 16px rgba(11,25,41,0.2)", transition: "transform 0.15s, box-shadow 0.15s" }} onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"} onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}><span style={{ fontSize: "17px" }}>+</span> Nueva Aseguradora</button>
-      </div>
+      <DashboardHeader
+        title="Aseguradoras"
+        subtitle="Directorio de entidades aseguradoras vinculadas a las garantías contractuales del IDEXUD."
+        breadcrumb="IDEXUD · Entidades Aseguradoras"
+        accent="#C9963A"
+        accent2="#F59E0B"
+        stats={[
+          { label: 'ASEGURADORAS', value: aseguradoras.length, desc: 'Entidades registradas' },
+          { label: 'PÓLIZAS',      value: totalPolizas,        desc: 'Garantías vinculadas'  },
+        ]}
+      >
+        <button
+          onClick={() => setModalForm({})}
+          className="flex items-center gap-2 px-4 h-9 rounded-lg text-sm font-semibold border border-white/25 text-white bg-white/10 hover:bg-white/20 transition-colors"
+        >
+          <span className="text-base leading-none">+</span> Nueva Aseguradora
+        </button>
+      </DashboardHeader>
 
       <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: 1, minWidth: "220px" }}>
@@ -324,8 +413,15 @@ export default function AseguradorasList({ onGuardar, onEliminar }) {
         </div>
       )}
 
-      {modalPolizas && <PolizasModal entidad={modalPolizas} tipo="aseguradoras" onCerrar={() => setModalPolizas(null)} />}
-      {modalForm !== null && <FormModal aseguradora={Object.keys(modalForm).length ? modalForm : null} onGuardar={handleGuardar} onCerrar={() => setModalForm(null)} />}
+      {modalPolizas && <PolizasModal entidad={modalPolizas} onCerrar={() => setModalPolizas(null)} />}
+      {modalForm !== null && (
+        <FormModal
+          aseguradora={Object.keys(modalForm).length ? modalForm : null}
+          onGuardar={handleGuardar}
+          onCerrar={() => { setModalForm(null); setErrorGuardar(null); }}
+          errorExterno={errorGuardar}
+        />
+      )}
     </div>
   );
 }

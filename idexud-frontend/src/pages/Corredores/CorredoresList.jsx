@@ -1,297 +1,157 @@
 // src/pages/Corredores/CorredoresList.jsx
-// Vista de tarjetas elegantes para corredores/aseguradoras.
-// Reemplaza la vista de tabla de contratistas.
+// Vista de tarjetas para los corredores de seguros reales del IDEXUD.
+// Consume GET /api/v1/corredores y POST /api/v1/corredores
 
-import React, { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { Search, Plus, Users, AlertTriangle, ArrowUpDown, X, Loader2 } from "lucide-react";
+import { corredoresApi, polizasApi } from "../../services/api";
+import CorredorCard, { CorredorSkeleton } from "../../components/corredores/CorredorCard";
+import DashboardHeader from "../../components/layout/DashboardHeader";
 
-// ── Datos de demo ─────────────────────────────────────────────────
-const CORREDORES_DEMO = [
-  {
-    id: 1,
-    nombre: "Seguros Sura S.A.",
-    contacto: "Carlos Mendoza",
-    cargo: "Ejecutivo de Cuenta",
-    email: "c.mendoza@sura.com.co",
-    telefono: "+57 (4) 325 8000",
-    polizas_activas: 14,
-    polizas_total: 38,
-    especialidad: "Cumplimiento · Anticipo",
-    logo_inicial: "S",
-    color: "#1A73E8",
-    rating: 4.8,
-    ciudad: "Medellín",
-  },
-  {
-    id: 2,
-    nombre: "Allianz Seguros",
-    contacto: "Valentina Ríos",
-    cargo: "Directora Corporativa",
-    email: "v.rios@allianz.com.co",
-    telefono: "+57 (1) 745 0800",
-    polizas_activas: 9,
-    polizas_total: 21,
-    especialidad: "Bancaria · Cumplimiento",
-    logo_inicial: "A",
-    color: "#00B0EA",
-    rating: 4.5,
-    ciudad: "Bogotá",
-  },
-  {
-    id: 3,
-    nombre: "Liberty Seguros",
-    contacto: "Marcela Gómez",
-    cargo: "Gerente de Cuentas",
-    email: "m.gomez@liberty.com.co",
-    telefono: "+57 (1) 317 1000",
-    polizas_activas: 7,
-    polizas_total: 15,
-    especialidad: "Calidad · Pago de Salarios",
-    logo_inicial: "L",
-    color: "#F36F21",
-    rating: 4.2,
-    ciudad: "Bogotá",
-  },
-  {
-    id: 4,
-    nombre: "Mapfre Colombia",
-    contacto: "Andrés Peláez",
-    cargo: "Asesor Comercial",
-    email: "a.pelaez@mapfre.com.co",
-    telefono: "+57 (1) 344 5600",
-    polizas_activas: 5,
-    polizas_total: 12,
-    especialidad: "Anticipo · Garantía Única",
-    logo_inicial: "M",
-    color: "#C4141C",
-    rating: 4.0,
-    ciudad: "Bogotá",
-  },
-  {
-    id: 5,
-    nombre: "Chubb de Colombia",
-    contacto: "Isabella Vargas",
-    cargo: "VP Grandes Cuentas",
-    email: "i.vargas@chubb.com",
-    telefono: "+57 (1) 638 5000",
-    polizas_activas: 11,
-    polizas_total: 29,
-    especialidad: "Cumplimiento · Manejo",
-    logo_inicial: "C",
-    color: "#0033A0",
-    rating: 4.7,
-    ciudad: "Bogotá",
-  },
-  {
-    id: 6,
-    nombre: "Generali Colombia",
-    contacto: "Tomás Herrera",
-    cargo: "Director Empresarial",
-    email: "t.herrera@generali.com.co",
-    telefono: "+57 (1) 646 8900",
-    polizas_activas: 3,
-    polizas_total: 8,
-    especialidad: "Responsabilidad Civil",
-    logo_inicial: "G",
-    color: "#B50000",
-    rating: 3.9,
-    ciudad: "Medellín",
-  },
-];
-
-// ── Estrellas de rating ───────────────────────────────────────────
-function Stars({ rating }) {
+// ── Estado vacío (sin resultados de búsqueda o sin corredores en BD) ─────────
+function EstadoVacio({ busqueda }) {
+  const esBusqueda = Boolean(busqueda);
   return (
-    <div style={{ display: "flex", gap: "2px", alignItems: "center" }}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <svg key={n} width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path
-            d="M6 1L7.39 4.26L11 4.63L8.5 6.97L9.18 10.5L6 8.77L2.82 10.5L3.5 6.97L1 4.63L4.61 4.26L6 1Z"
-            fill={n <= Math.floor(rating) ? "#F59E0B" : n - 0.5 <= rating ? "#FCD34D" : "#E2E8F0"}
-          />
-        </svg>
-      ))}
-      <span style={{ fontSize: "12px", color: "#64748B", marginLeft: "4px" }}>{rating}</span>
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center",
+      padding: "64px 24px", gap: 12,
+    }}>
+      <div style={{
+        width: 72, height: 72, borderRadius: 20,
+        background: "#F8FAFC", border: "1.5px solid #E2E8F0",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        marginBottom: 4,
+      }}>
+        {esBusqueda
+          ? <Search size={30} style={{ color: "#CBD5E1" }} />
+          : <Users size={30} style={{ color: "#CBD5E1" }} />
+        }
+      </div>
+      <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#475569" }}>
+        {esBusqueda ? "Sin resultados" : "No hay corredores registrados"}
+      </p>
+      <p style={{ margin: 0, fontSize: 13, color: "#94A3B8", textAlign: "center", maxWidth: 320 }}>
+        {esBusqueda
+          ? <>No se encontraron corredores para <strong style={{ color: "#64748B" }}>"{busqueda}"</strong>. Prueba con otro término.</>
+          : <>Ejecuta <code style={{ fontFamily: "monospace", background: "#F1F5F9", padding: "1px 6px", borderRadius: 5, fontSize: 12 }}>python -m scripts.seed_corredores</code> en el backend para cargar los 5 corredores reales.</>
+        }
+      </p>
     </div>
   );
 }
 
-// ── Card de corredor ──────────────────────────────────────────────
-function CorredorCard({ corredor, onVerPolizas, onContactar }) {
-  const [hovered, setHovered] = useState(false);
-  const pctActivas = Math.round((corredor.polizas_activas / corredor.polizas_total) * 100);
+// ── Baner de error de conexión ───────────────────────────────────────────────
+function BannerError({ mensaje }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "flex-start", gap: 12,
+      padding: "14px 18px", background: "#FEF2F2",
+      border: "1px solid #FECACA", borderRadius: 14,
+      marginBottom: 24,
+    }}>
+      <AlertTriangle size={16} style={{ color: "#DC2626", marginTop: 1, flexShrink: 0 }} />
+      <div>
+        <p style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 600, color: "#991B1B" }}>
+          Error al cargar corredores
+        </p>
+        <p style={{ margin: 0, fontSize: 12, color: "#DC2626" }}>{mensaje}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal de creación de corredor ────────────────────────────────────────────
+function FormCorredor({ onCerrar, onCreado }) {
+  const VACIO = { nombre_corredor: "", empresa: "", email_principal: "", telefono_principal: "", ayudante_nombre: "", email_ayudante: "", telefono_ayudante: "" };
+  const [form, setForm] = useState(VACIO);
+  const [guardando, setGuardando] = useState(false);
+  const [errorApi, setErrorApi] = useState(null);
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const puedeGuardar = form.nombre_corredor.trim().length >= 2
+    && form.empresa.trim().length >= 2
+    && form.email_principal.trim().length > 0
+    && form.telefono_principal.trim().length > 0;
+
+  const handleGuardar = async () => {
+    if (!puedeGuardar) return;
+    setGuardando(true);
+    setErrorApi(null);
+    try {
+      const payload = Object.fromEntries(
+        Object.entries(form).filter(([, v]) => v.trim() !== "")
+      );
+      await corredoresApi.crear(payload);
+      onCreado();
+      onCerrar();
+    } catch (err) {
+      setErrorApi(err.mensajeUsuario ?? "Error al registrar. Intente de nuevo.");
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const inputSt = {
+    width: "100%", padding: "9px 11px",
+    border: "1.5px solid #E2E8F0", borderRadius: "9px",
+    fontSize: "13px", color: "#0F172A", background: "#fff",
+    outline: "none", boxSizing: "border-box",
+  };
+  const labelSt = { display: "block", fontSize: "11px", fontWeight: 600, color: "#64748B", marginBottom: "5px", textTransform: "uppercase", letterSpacing: "0.05em" };
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        background: "#fff",
-        border: `1.5px solid ${hovered ? corredor.color : "#E2E8F0"}`,
-        borderRadius: "18px",
-        padding: "0",
-        overflow: "hidden",
-        transition: "all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
-        transform: hovered ? "translateY(-3px)" : "translateY(0)",
-        boxShadow: hovered
-          ? `0 12px 32px rgba(0,0,0,0.1), 0 0 0 0px ${corredor.color}20`
-          : "0 2px 8px rgba(0,0,0,0.04)",
-        cursor: "default",
-      }}
+      onClick={onCerrar}
+      style={{ position: "fixed", inset: 0, zIndex: 1200, background: "rgba(11,25,41,0.7)", backdropFilter: "blur(5px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}
     >
-      {/* Tira de color superior */}
-      <div style={{
-        height: "5px",
-        background: `linear-gradient(90deg, ${corredor.color}, ${corredor.color}99)`,
-      }} />
-
-      {/* Cuerpo de la card */}
-      <div style={{ padding: "20px" }}>
-
-        {/* Header: logo + nombre + ciudad */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "14px", marginBottom: "16px" }}>
-          <div style={{
-            width: "48px", height: "48px", borderRadius: "12px",
-            background: `linear-gradient(135deg, ${corredor.color}, ${corredor.color}BB)`,
-            color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "20px", fontWeight: 800, flexShrink: 0,
-            boxShadow: `0 4px 12px ${corredor.color}40`,
-          }}>
-            {corredor.logo_inicial}
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "18px", width: "100%", maxWidth: "520px", boxShadow: "0 32px 64px rgba(0,0,0,0.2)", overflow: "hidden" }}>
+        {/* Header */}
+        <div style={{ padding: "20px 24px", background: "#0F172A", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <p style={{ margin: 0, fontSize: "11px", opacity: 0.5, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" }}>Nuevo registro</p>
+            <h2 style={{ margin: 0, fontSize: "19px", fontWeight: 700 }}>Registrar Corredor</h2>
           </div>
-
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              fontSize: "16px", fontWeight: 700, color: "#0F172A",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-            }}>
-              {corredor.nombre}
-            </div>
-            <div style={{ fontSize: "12px", color: "#94A3B8", marginTop: "2px" }}>
-              📍 {corredor.ciudad}
-            </div>
-          </div>
-
-          <Stars rating={corredor.rating} />
+          <button onClick={onCerrar} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", opacity: 0.6, padding: "4px" }}><X size={18} /></button>
         </div>
-
-        {/* Especialidades */}
-        <div style={{ marginBottom: "16px" }}>
-          {corredor.especialidad.split(" · ").map((esp) => (
-            <span key={esp} style={{
-              display: "inline-block",
-              fontSize: "11px",
-              fontWeight: 600,
-              padding: "3px 9px",
-              borderRadius: "99px",
-              background: `${corredor.color}12`,
-              color: corredor.color,
-              border: `1px solid ${corredor.color}30`,
-              marginRight: "5px",
-              marginBottom: "5px",
-              letterSpacing: "0.02em",
-            }}>
-              {esp}
-            </span>
-          ))}
-        </div>
-
-        {/* Contacto */}
-        <div style={{
-          padding: "12px 14px",
-          background: "#F8FAFC",
-          borderRadius: "10px",
-          marginBottom: "16px",
-        }}>
-          <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>
-            {corredor.contacto}
+        {/* Campos */}
+        <div style={{ padding: "20px 24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={labelSt}>Empresa / Nombre comercial *</label>
+            <input value={form.empresa} onChange={set("empresa")} placeholder="Ej: Seguros del Estado S.A." style={inputSt} />
           </div>
-          <div style={{ fontSize: "11px", color: "#64748B", marginTop: "1px" }}>
-            {corredor.cargo}
+          <div style={{ gridColumn: "1/-1" }}>
+            <label style={labelSt}>Nombre del corredor *</label>
+            <input value={form.nombre_corredor} onChange={set("nombre_corredor")} placeholder="Ej: Juan Pérez" style={inputSt} />
           </div>
-          <div style={{ marginTop: "8px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
-            <a href={`mailto:${corredor.email}`} style={{
-              fontSize: "12px", color: "#2563EB", textDecoration: "none",
-              display: "flex", alignItems: "center", gap: "4px",
-            }}>
-              ✉️ {corredor.email}
-            </a>
-            <a href={`tel:${corredor.telefono}`} style={{
-              fontSize: "12px", color: "#2563EB", textDecoration: "none",
-              display: "flex", alignItems: "center", gap: "4px",
-            }}>
-              📞 {corredor.telefono}
-            </a>
+          <div>
+            <label style={labelSt}>Email principal *</label>
+            <input type="email" value={form.email_principal} onChange={set("email_principal")} placeholder="corredor@empresa.com" style={inputSt} />
+          </div>
+          <div>
+            <label style={labelSt}>Teléfono principal *</label>
+            <input value={form.telefono_principal} onChange={set("telefono_principal")} placeholder="300 000 0000" style={inputSt} />
+          </div>
+          <div>
+            <label style={labelSt}>Nombre ayudante</label>
+            <input value={form.ayudante_nombre} onChange={set("ayudante_nombre")} placeholder="Opcional" style={inputSt} />
+          </div>
+          <div>
+            <label style={labelSt}>Email ayudante</label>
+            <input type="email" value={form.email_ayudante} onChange={set("email_ayudante")} placeholder="Opcional" style={inputSt} />
           </div>
         </div>
-
-        {/* Contador de pólizas */}
-        <div style={{ marginBottom: "16px" }}>
-          <div style={{
-            display: "flex", justifyContent: "space-between",
-            fontSize: "12px", color: "#64748B", marginBottom: "6px",
-          }}>
-            <span>Pólizas activas</span>
-            <span style={{ fontWeight: 700, color: "#0F172A" }}>
-              {corredor.polizas_activas}
-              <span style={{ fontWeight: 400, color: "#94A3B8" }}> / {corredor.polizas_total}</span>
-            </span>
+        {/* Error */}
+        {errorApi && (
+          <div style={{ margin: "0 24px 8px", padding: "10px 14px", borderRadius: "10px", background: "#FEF2F2", border: "1px solid #FECACA", fontSize: "12px", color: "#DC2626" }}>
+            {errorApi}
           </div>
-          <div style={{ height: "6px", borderRadius: "99px", background: "#F1F5F9" }}>
-            <div style={{
-              height: "100%", borderRadius: "99px",
-              background: `linear-gradient(90deg, ${corredor.color}, ${corredor.color}BB)`,
-              width: `${pctActivas}%`,
-              transition: "width 0.5s ease",
-            }} />
-          </div>
-          <div style={{ fontSize: "10px", color: "#94A3B8", marginTop: "4px", textAlign: "right" }}>
-            {pctActivas}% activas del total histórico
-          </div>
-        </div>
-
-        {/* Acciones */}
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            onClick={() => onVerPolizas?.(corredor)}
-            style={{
-              flex: 1,
-              padding: "9px",
-              borderRadius: "10px",
-              border: `1.5px solid ${corredor.color}`,
-              background: "transparent",
-              color: corredor.color,
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: "pointer",
-              transition: "all 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = `${corredor.color}12`;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-            }}
-          >
-            Ver {corredor.polizas_activas} pólizas
-          </button>
-          <button
-            onClick={() => onContactar?.(corredor)}
-            style={{
-              flex: 1,
-              padding: "9px",
-              borderRadius: "10px",
-              border: "none",
-              background: corredor.color,
-              color: "#fff",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: "pointer",
-              transition: "opacity 0.15s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-          >
-            Contactar
+        )}
+        {/* Footer */}
+        <div style={{ padding: "12px 24px 20px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+          <button onClick={onCerrar} style={{ padding: "9px 18px", border: "1.5px solid #E2E8F0", borderRadius: "9px", background: "#fff", color: "#64748B", fontSize: "13px", fontWeight: 500, cursor: "pointer" }}>Cancelar</button>
+          <button onClick={handleGuardar} disabled={guardando || !puedeGuardar} style={{ padding: "9px 22px", border: "none", borderRadius: "9px", background: guardando || !puedeGuardar ? "#94A3B8" : "#0F172A", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: guardando || !puedeGuardar ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 7 }}>
+            {guardando && <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />}
+            {guardando ? "Guardando…" : "Registrar corredor"}
           </button>
         </div>
       </div>
@@ -299,144 +159,334 @@ function CorredorCard({ corredor, onVerPolizas, onContactar }) {
   );
 }
 
-// ── Lista principal ───────────────────────────────────────────────
-export default function CorredoresList({
-  corredores = CORREDORES_DEMO,
-  onVerPolizas,
-  onNuevoCorredor,
-}) {
-  const [busqueda, setBusqueda] = useState("");
-  const [ordenar, setOrdenar] = useState("activas");
+// ── Modal de pólizas vinculadas al corredor ──────────────────────────────────
+function PolizasModal({ corredor, onCerrar }) {
+  const [polizas, setPolizas] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError]     = useState(null);
+  const overlayRef = useRef(null);
 
-  const corredoresFiltrados = useMemo(() => {
-    let lista = corredores.filter((c) => {
-      const q = busqueda.toLowerCase();
-      return (
-        c.nombre.toLowerCase().includes(q) ||
-        c.contacto.toLowerCase().includes(q) ||
-        c.especialidad.toLowerCase().includes(q) ||
-        c.ciudad.toLowerCase().includes(q)
-      );
-    });
+  useEffect(() => {
+    let activo = true;
+    setCargando(true);
+    setError(null);
+    console.log("PolizasModal: cargando pólizas del corredor ID", corredor.id);
+    polizasApi
+      .listar({ corredor_id: corredor.id, por_pagina: 100 })
+      .then(({ data }) => {
+        if (!activo) return;
+        console.log("PolizasModal: pólizas recibidas →", data.items?.length ?? 0);
+        setPolizas(data.items ?? []);
+        setCargando(false);
+      })
+      .catch((err) => {
+        if (!activo) return;
+        console.error("PolizasModal: error al cargar pólizas", err);
+        setError("No se pudieron cargar las pólizas.");
+        setCargando(false);
+      });
+    return () => { activo = false; };
+  }, [corredor.id]);
 
-    lista = [...lista].sort((a, b) => {
-      if (ordenar === "activas") return b.polizas_activas - a.polizas_activas;
-      if (ordenar === "rating")  return b.rating - a.rating;
-      if (ordenar === "nombre")  return a.nombre.localeCompare(b.nombre);
-      return 0;
-    });
+  useEffect(() => {
+    const fn = (e) => e.key === "Escape" && onCerrar();
+    window.addEventListener("keydown", fn);
+    return () => window.removeEventListener("keydown", fn);
+  }, [onCerrar]);
 
-    return lista;
-  }, [corredores, busqueda, ordenar]);
-
-  const totalActivas = corredores.reduce((s, c) => s + c.polizas_activas, 0);
+  const COL = {
+    ACTIVA:             { bg: "#D1FAE5", text: "#065F46" },
+    POR_VENCER:         { bg: "#FEF3C7", text: "#92400E" },
+    VENCIDA:            { bg: "#FEE2E2", text: "#991B1B" },
+    BORRADOR:           { bg: "#F1F5F9", text: "#475569" },
+    PENDIENTE_REVISION: { bg: "#DBEAFE", text: "#1D4ED8" },
+    RENOVADA:           { bg: "#EDE9FE", text: "#5B21B6" },
+    ANULADA:            { bg: "#F1F5F9", text: "#6B7280" },
+  };
 
   return (
-    <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "24px",
-                  fontFamily: "system-ui, -apple-system, sans-serif" }}>
-
-      {/* Header de la página */}
-      <div style={{ marginBottom: "28px" }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px" }}>
-          <div>
-            <h1 style={{ margin: "0 0 6px", fontSize: "28px", fontWeight: 800, color: "#0F172A" }}>
-              Corredores y Aseguradoras
-            </h1>
-            <p style={{ margin: 0, fontSize: "14px", color: "#64748B" }}>
-              {corredores.length} proveedores ·{" "}
-              <strong style={{ color: "#0F172A" }}>{totalActivas}</strong> pólizas activas en total
-            </p>
+    <div
+      ref={overlayRef}
+      onClick={(e) => e.target === overlayRef.current && onCerrar()}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1200,
+        background: "rgba(11,25,41,0.75)", backdropFilter: "blur(8px)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: "24px",
+      }}
+    >
+      <div style={{
+        background: "#fff", borderRadius: 20, width: "100%", maxWidth: 640,
+        maxHeight: "80vh", display: "flex", flexDirection: "column",
+        boxShadow: "0 40px 80px rgba(0,0,0,0.28)", overflow: "hidden",
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: "22px 28px 18px", borderBottom: "1px solid #E2E8F0",
+          display: "flex", alignItems: "center", gap: 14, flexShrink: 0,
+        }}>
+          <div style={{
+            width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+            background: "#0F172A", color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 18, fontWeight: 800,
+          }}>
+            {corredor.empresa.charAt(0).toUpperCase()}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              Pólizas vinculadas {!cargando && `· ${polizas.length}`}
+            </div>
+            <h2 style={{ margin: "2px 0 0", fontSize: 18, fontWeight: 700, color: "#0F172A" }}>
+              {corredor.empresa}
+            </h2>
           </div>
           <button
-            onClick={onNuevoCorredor}
-            style={{
-              padding: "10px 20px",
-              border: "none",
-              borderRadius: "10px",
-              background: "#0F172A",
-              color: "#fff",
-              fontSize: "14px",
-              fontWeight: 600,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              flexShrink: 0,
-            }}
+            onClick={onCerrar}
+            style={{ width: 30, height: 30, border: "1px solid #E2E8F0", borderRadius: 7, background: "none", cursor: "pointer", color: "#64748B", display: "flex", alignItems: "center", justifyContent: "center" }}
           >
-            <span style={{ fontSize: "18px" }}>+</span> Nuevo corredor
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Lista con scroll vertical */}
+        <div style={{ overflowY: "auto", flex: 1, padding: "18px 28px" }}>
+          {cargando ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[1, 2, 3].map(i => (
+                <div key={i} style={{ height: 68, borderRadius: 12, background: "#F1F5F9" }} />
+              ))}
+            </div>
+          ) : error ? (
+            <div style={{ textAlign: "center", padding: 40, color: "#DC2626", fontSize: 14 }}>{error}</div>
+          ) : polizas.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40, color: "#94A3B8", fontSize: 15 }}>
+              No hay pólizas vinculadas a este corredor.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {polizas.map(p => {
+                const c = COL[p.estado] ?? COL.BORRADOR;
+                return (
+                  <div
+                    key={p.id}
+                    style={{ padding: "14px 16px", borderRadius: 11, border: "1.5px solid #E2E8F0", display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", transition: "border-color 0.15s" }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = "#0F172A"}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = "#E2E8F0"}
+                  >
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", fontFamily: "monospace" }}>
+                          {p.numero_poliza || "Sin número"}
+                        </span>
+                        <span style={{ padding: "2px 7px", borderRadius: 99, background: c.bg, color: c.text, fontSize: 10, fontWeight: 700 }}>
+                          {p.estado}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "#64748B" }}>
+                        {p.numero_contrato || p.objeto_contrato || "—"}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>
+                        {p.valor_asegurado_fmt || "—"}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#94A3B8" }}>
+                        Hasta {p.vigencia_hasta || "—"}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "14px 28px 20px", borderTop: "1px solid #E2E8F0", display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
+          <button
+            onClick={onCerrar}
+            style={{ padding: "8px 18px", border: "1.5px solid #E2E8F0", borderRadius: 9, background: "#fff", color: "#64748B", fontSize: 13, fontWeight: 500, cursor: "pointer" }}
+          >
+            Cerrar
           </button>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {/* Filtros */}
-      <div style={{
-        display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap",
-      }}>
-        {/* Búsqueda */}
-        <div style={{ position: "relative", flex: 1, minWidth: "220px" }}>
-          <span style={{
-            position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)",
-            fontSize: "16px", pointerEvents: "none",
-          }}>🔍</span>
-          <input
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar por nombre, contacto, especialidad..."
-            style={{
-              width: "100%", padding: "10px 14px 10px 38px",
-              border: "1.5px solid #E2E8F0", borderRadius: "10px",
-              fontSize: "14px", color: "#0F172A", background: "#fff",
-              outline: "none", boxSizing: "border-box",
-            }}
-          />
-        </div>
+// ── Vista principal ──────────────────────────────────────────────────────────
+export default function CorredoresList() {
+  const [corredores, setCorredores] = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState(null);
+  const [modalCrear, setModalCrear] = useState(false);
+  const [modalPol, setModalPol]     = useState(null);
+  const [busqueda, setBusqueda]     = useState("");
+  const [ordenar, setOrdenar]       = useState("activas");
 
-        {/* Ordenar */}
-        <select
-          value={ordenar}
-          onChange={(e) => setOrdenar(e.target.value)}
-          style={{
-            padding: "10px 36px 10px 14px",
-            border: "1.5px solid #E2E8F0", borderRadius: "10px",
-            fontSize: "14px", color: "#475569", background: "#fff",
-            cursor: "pointer", outline: "none",
-            appearance: "none",
-            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
-            backgroundRepeat: "no-repeat",
-            backgroundPosition: "right 10px center",
-          }}
+  const fetchCorredores = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data } = await corredoresApi.listar();
+      setCorredores(data);
+    } catch (err) {
+      setError(err.mensajeUsuario ?? "Error al cargar corredores.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchCorredores(); }, [fetchCorredores]);
+
+  const lista = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    const filtrados = corredores.filter((c) =>
+      c.empresa.toLowerCase().includes(q) ||
+      c.nombre_corredor.toLowerCase().includes(q) ||
+      (c.ayudante_nombre ?? "").toLowerCase().includes(q) ||
+      c.email_principal.toLowerCase().includes(q)
+    );
+    return [...filtrados].sort((a, b) => {
+      if (ordenar === "activas") return (b.polizas_activas || 0) - (a.polizas_activas || 0);
+      return a.empresa.localeCompare(b.empresa, "es");
+    });
+  }, [corredores, busqueda, ordenar]);
+
+  const totalActivas = corredores.reduce((s, c) => s + (c.polizas_activas || 0), 0);
+
+  return (
+    <div style={{
+      maxWidth: 1120, margin: "0 auto", padding: "28px 24px",
+      fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    }}>
+
+      {/* ── Encabezado ─────────────────────────────────────────────────────── */}
+      <DashboardHeader
+        title="Corredores de Seguros"
+        subtitle="Intermediarios de seguros que gestionan las pólizas contractuales del IDEXUD."
+        breadcrumb="IDEXUD · Corredores"
+        accent="#8B5CF6"
+        accent2="#6366F1"
+        stats={[
+          { label: 'CORREDORES',    value: loading ? null : corredores.length, desc: 'Intermediarios registrados' },
+          { label: 'PÓLIZAS ACTIVAS', value: loading ? null : totalActivas,    desc: 'Pólizas gestionadas'        },
+        ]}
+      >
+        <button
+          onClick={() => setModalCrear(true)}
+          className="flex items-center gap-2 px-4 h-9 rounded-lg text-sm font-semibold border border-white/25 text-white bg-white/10 hover:bg-white/20 transition-colors"
         >
-          <option value="activas">Ordenar: Más activas</option>
-          <option value="rating">Ordenar: Mejor rating</option>
-          <option value="nombre">Ordenar: Nombre A-Z</option>
-        </select>
-      </div>
+          <Plus size={16} />
+          Nuevo corredor
+        </button>
+      </DashboardHeader>
 
-      {/* Grid de cards */}
-      {corredoresFiltrados.length === 0 ? (
-        <div style={{
-          textAlign: "center", padding: "60px 24px",
-          color: "#94A3B8", fontSize: "16px",
-        }}>
-          <div style={{ fontSize: "48px", marginBottom: "12px" }}>🔍</div>
-          No se encontraron corredores para "<strong>{busqueda}</strong>"
+      {/* ── Banner de error ─────────────────────────────────────────────────── */}
+      {error && !loading && <BannerError mensaje={error} />}
+
+      {/* ── Barra de filtros ────────────────────────────────────────────────── */}
+      {!error && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
+          {/* Buscador */}
+          <div style={{ position: "relative", flex: 1, minWidth: 220 }}>
+            <Search
+              size={14}
+              style={{
+                position: "absolute", left: 13, top: "50%",
+                transform: "translateY(-50%)", color: "#94A3B8",
+                pointerEvents: "none",
+              }}
+            />
+            <input
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar por empresa, corredor o email…"
+              style={{
+                width: "100%", padding: "10px 14px 10px 36px",
+                border: "1.5px solid #E2E8F0", borderRadius: 10,
+                fontSize: 13, color: "#0F172A", background: "#fff",
+                outline: "none", boxSizing: "border-box",
+                transition: "border-color 0.15s",
+              }}
+              onFocus={(e) => { e.target.style.borderColor = "#94A3B8"; }}
+              onBlur={(e)  => { e.target.style.borderColor = "#E2E8F0"; }}
+            />
+          </div>
+
+          {/* Ordenar */}
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <ArrowUpDown
+              size={13}
+              style={{
+                position: "absolute", left: 11, top: "50%",
+                transform: "translateY(-50%)", color: "#94A3B8",
+                pointerEvents: "none",
+              }}
+            />
+            <select
+              value={ordenar}
+              onChange={(e) => setOrdenar(e.target.value)}
+              style={{
+                padding: "10px 36px 10px 30px",
+                border: "1.5px solid #E2E8F0", borderRadius: 10,
+                fontSize: 13, color: "#475569", background: "#fff",
+                cursor: "pointer", outline: "none", appearance: "none",
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "right 10px center",
+              }}
+            >
+              <option value="activas">Más pólizas activas</option>
+              <option value="nombre">Empresa A → Z</option>
+            </select>
+          </div>
         </div>
+      )}
+
+      {/* ── Contenido principal ─────────────────────────────────────────────── */}
+      {loading ? (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+          gap: 20,
+        }}>
+          {[1, 2, 3, 4, 5].map((n) => <CorredorSkeleton key={n} />)}
+        </div>
+      ) : lista.length === 0 ? (
+        <EstadoVacio busqueda={busqueda} />
       ) : (
         <div style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-          gap: "20px",
+          gap: 20,
         }}>
-          {corredoresFiltrados.map((corredor) => (
+          {lista.map((corredor) => (
             <CorredorCard
               key={corredor.id}
               corredor={corredor}
-              onVerPolizas={onVerPolizas}
-              onContactar={(c) => window.location.href = `mailto:${c.email}`}
+              onVerPolizas={(c) => {
+                console.log("Ver pólizas clickeado, ID Corredor:", c.id);
+                setModalPol(c);
+              }}
             />
           ))}
         </div>
+      )}
+
+      {modalCrear && (
+        <FormCorredor
+          onCerrar={() => setModalCrear(false)}
+          onCreado={fetchCorredores}
+        />
+      )}
+
+      {modalPol && (
+        <PolizasModal
+          corredor={modalPol}
+          onCerrar={() => setModalPol(null)}
+        />
       )}
     </div>
   );

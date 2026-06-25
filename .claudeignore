@@ -1,0 +1,23 @@
+# Carpetas pesadas que Claude NO debe leer
+**/node_modules/
+**/venv/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.git/
+**/dist/
+**/build/
+**/*.log
+
+# Archivos de entorno y configuración sensible
+.env
+.env.*
+.dockerignore
+*.db
+*.sqlite3
+
+# Archivos de documentación o imágenes que no son código
+*.png
+*.jpg
+*.pdf
+docs/

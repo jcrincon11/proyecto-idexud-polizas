@@ -1,10 +1,12 @@
-import { useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, User, DollarSign, Loader2, Lock, Check, ExternalLink, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, User, DollarSign, Loader2, Lock, Check, ExternalLink, AlertTriangle, Pencil, X, FileText, Calendar, Shield, Building2, Briefcase, Hash, AlignLeft, Link2, Landmark } from 'lucide-react';
 import { usePolizaDetalle, useChecklist } from '../../hooks/usePolizaDetalle';
 import { BadgeEstado } from "../../components/ui/Badge";
 import { useAuth } from '../../context/AuthContext';
+import { progresoDeEstado } from '../../utils/progress';
+import { polizasApi } from '../../services/api';
 
 const PASOS = [
   { numero: 1, campo: 'paso1_solicitud_recibida', label: 'Solicitud recibida', rol: 'JURIDICA' },
@@ -40,6 +42,85 @@ function PasoChecklist({ paso, checklist, guardando, onToggle, disabled }) {
   );
 }
 
+/**
+ * Campo de texto editable inline.
+ * Muestra el valor como texto; al hacer clic en el ícono de lápiz convierte
+ * en input. Guarda en el servidor al perder el foco (onBlur) o presionar Enter.
+ */
+function CampoEditable({ label, valor, campo, polizaId, placeholder, onGuardado }) {
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState(valor ?? '');
+  const [guardando, setGuardando] = useState(false);
+  const inputRef = useRef(null);
+
+  // Sincronizar si el valor externo cambia (p.ej. recarga)
+  useEffect(() => { setTexto(valor ?? ''); }, [valor]);
+
+  useEffect(() => {
+    if (editando) inputRef.current?.focus();
+  }, [editando]);
+
+  const guardar = useCallback(async () => {
+    const nuevo = texto.trim();
+    const original = (valor ?? '').trim();
+    if (nuevo === original) { setEditando(false); return; }
+
+    setGuardando(true);
+    try {
+      const { data } = await polizasApi.actualizar(polizaId, { [campo]: nuevo || null });
+      onGuardado(data);
+      toast.success(`${label} actualizado`);
+    } catch {
+      toast.error(`No se pudo guardar ${label}`);
+      setTexto(original);
+    } finally {
+      setGuardando(false);
+      setEditando(false);
+    }
+  }, [texto, valor, campo, polizaId, label, onGuardado]);
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); guardar(); }
+    if (e.key === 'Escape') { setTexto(valor ?? ''); setEditando(false); }
+  };
+
+  if (editando) {
+    return (
+      <div className="flex items-center gap-1.5 w-full">
+        <input
+          ref={inputRef}
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          onBlur={guardar}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          className="flex-1 text-xs border border-ud-naranja/50 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ud-naranja bg-white"
+          disabled={guardando}
+        />
+        {guardando
+          ? <Loader2 size={12} className="animate-spin text-gray-400 flex-shrink-0" />
+          : <button onMouseDown={(e) => { e.preventDefault(); setTexto(valor ?? ''); setEditando(false); }} className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"><X size={13} /></button>
+        }
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-full overflow-visible">
+      <span className={`block text-xs font-bold pr-8 break-words leading-snug ${texto ? 'text-blue-600' : 'text-gray-400 italic'}`}>
+        {texto || placeholder || 'Sin asignar'}
+      </span>
+      <button
+        onClick={() => setEditando(true)}
+        className="absolute right-0 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-gray-400 hover:text-ud-naranja hover:bg-gray-200 transition-colors"
+        title={`Editar ${label}`}
+      >
+        <Pencil size={13} />
+      </button>
+    </div>
+  );
+}
+
 export default function PolizaDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -47,7 +128,17 @@ export default function PolizaDetail() {
   const { poliza, loading } = usePolizaDetalle(id);
   const { checklist, guardando, setChecklist, togglePaso } = useChecklist(id);
 
-  useEffect(() => { if (poliza?.checklist) setChecklist(poliza.checklist); }, [poliza, setChecklist]);
+  // Valores locales para los dos campos editables
+  const [centroCosto, setCentroCosto] = useState('');
+  const [enlaceActivo, setEnlaceActivo] = useState('');
+
+  useEffect(() => {
+    if (poliza?.checklist) setChecklist(poliza.checklist);
+    if (poliza) {
+      setCentroCosto(poliza.centro_costo_solicitante ?? '');
+      setEnlaceActivo(poliza.enlace_soporte_pago ?? '');
+    }
+  }, [poliza, setChecklist]);
 
   const handleTogglePaso = useCallback(async (campo, completado) => {
     try {
@@ -62,6 +153,12 @@ export default function PolizaDetail() {
       toast.error('No se pudo actualizar el paso. Intente de nuevo.');
     }
   }, [togglePaso]);
+
+  // Callback que recibe la póliza actualizada del servidor y sincroniza estado local
+  const handlePolizaActualizada = useCallback((polizaActualizada) => {
+    setCentroCosto(polizaActualizada.centro_costo_solicitante ?? '');
+    setEnlaceActivo(polizaActualizada.enlace_soporte_pago ?? '');
+  }, []);
 
   const puedeEditar = (pasoRol) => {
     if (!usuario || !usuario.rol) return false;
@@ -86,29 +183,179 @@ export default function PolizaDetail() {
             <p className="text-xs text-gray-400 mt-1">ID Solicitud: {poliza.id}</p>
           </div>
         </div>
-        {poliza.enlace_nextcloud && (
-          <a href={poliza.enlace_nextcloud} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md"><ExternalLink size={16} /> Abrir Carpeta</a>
+        {enlaceActivo && (
+          <a href={enlaceActivo} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md"><ExternalLink size={16} /> Abrir Carpeta</a>
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
+          {/* ── Verificación Financiera ──────────────────────────────────── */}
           <div className="ud-card p-5 border-l-4 border-l-green-500">
-            <h3 className="font-bold text-sm mb-4 flex items-center gap-2"><DollarSign size={14} className="text-green-600" /> Verificación Financiera</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center"><span className="text-xs text-gray-500">Valor de la Prima:</span> <span className="text-sm font-bold text-ud-gris">{poliza.valor_prima_fmt || "$ 0.00"}</span></div>
-              <div className="bg-gray-50 p-2 rounded-lg border border-dashed border-gray-200">
-                <p className="text-[10px] text-gray-400 uppercase font-bold mb-1">Dato para Tesorería:</p>
-                <div className="flex justify-between"><span className="text-xs font-medium">Centro de Costos:</span><span className="text-xs font-bold text-blue-600">{poliza.centro_de_costos || 'Sin asignar'}</span></div>
+            <h3 className="font-bold text-sm mb-4 flex items-center gap-2 text-ud-gris">
+              <DollarSign size={14} className="text-green-600" />
+              Verificación Financiera
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Valor de la Prima — solo lectura */}
+              <div className="sm:col-span-2 bg-gray-50 p-4 rounded-lg border border-gray-100 hover:bg-gray-100/50 transition-colors">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <DollarSign size={14} className="text-gray-400" />
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Valor del Contrato</span>
+                </div>
+                <p className="text-sm font-semibold text-gray-900 mt-1">
+                  {(() => {
+                    const valorMostrar = poliza.valor_contrato || poliza.valor_asegurado;
+                    return valorMostrar
+                      ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(valorMostrar)
+                      : '—';
+                  })()}
+                </p>
               </div>
-              {usuario?.rol === 'FINANCIERA' && (
-                <div className="mt-4 p-2 bg-yellow-50 rounded text-[11px] text-yellow-700 flex gap-2"><AlertTriangle size={12} /><span>Verifique el pago en el extracto antes de marcar el paso 9.</span></div>
-              )}
+
+              {/* Centro de Costos — editable */}
+              <div className="relative bg-gray-50 p-4 rounded-lg border border-gray-100 hover:bg-gray-100/50 transition-colors overflow-visible">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Landmark size={14} className="text-gray-400" />
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Centro de Costos</span>
+                </div>
+                <div className="mt-1">
+                  <CampoEditable
+                    label="Centro de Costos"
+                    valor={centroCosto}
+                    campo="centro_costo_solicitante"
+                    polizaId={id}
+                    placeholder="Sin asignar"
+                    onGuardado={handlePolizaActualizada}
+                  />
+                </div>
+              </div>
+
+              {/* Soporte Documental — editable */}
+              <div className="relative bg-gray-50 p-4 rounded-lg border border-gray-100 hover:bg-gray-100/50 transition-colors overflow-visible">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Link2 size={14} className="text-gray-400" />
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Soporte Documental</span>
+                </div>
+                <div className="mt-1 space-y-1">
+                  {enlaceActivo && (
+                    <a href={enlaceActivo} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-semibold truncate">
+                      <ExternalLink size={11} className="flex-shrink-0" />
+                      <span className="truncate">Ver en Nextcloud</span>
+                    </a>
+                  )}
+                  <CampoEditable
+                    label="Enlace Soporte"
+                    valor={enlaceActivo}
+                    campo="enlace_soporte_pago"
+                    polizaId={id}
+                    placeholder="Pegar URL de Nextcloud…"
+                    onGuardado={handlePolizaActualizada}
+                  />
+                </div>
+              </div>
             </div>
+
+            {usuario?.rol === 'FINANCIERA' && (
+              <div className="mt-4 p-2 bg-yellow-50 rounded text-[11px] text-yellow-700 flex gap-2">
+                <AlertTriangle size={12} /><span>Verifique el pago en el extracto antes de marcar el paso 9.</span>
+              </div>
+            )}
           </div>
+
+          {/* ── Información Detallada de la Póliza ─────────────────────── */}
+          {(() => {
+            const MODALIDAD_LABEL = {
+              POLIZA_SEGURO: 'Póliza de Seguro',
+              PAGARE: 'Pagaré',
+              FIDUCIA: 'Fiducia',
+              GARANTIA_BANCARIA: 'Garantía Bancaria',
+              OTRO: 'Otro',
+            };
+            const na = (val) => val
+              ? <span className="text-sm font-semibold text-gray-900 mt-1 break-words">{val}</span>
+              : <span className="text-sm font-semibold text-gray-400 mt-1">N/A</span>;
+
+            const MicroCard = ({ icon: Icon, label, children, full }) => (
+              <div className={`relative bg-gray-50 p-4 rounded-lg border border-gray-100 hover:bg-gray-100/50 transition-colors overflow-visible${full ? ' md:col-span-2' : ''}`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Icon size={14} className="text-gray-400 flex-shrink-0" />
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{label}</span>
+                </div>
+                {children}
+              </div>
+            );
+
+            return (
+              <div className="bg-white rounded-lg border shadow-sm p-6">
+                <h3 className="font-bold text-sm mb-4 flex items-center gap-2 text-ud-gris">
+                  <FileText size={14} className="text-ud-naranja" />
+                  Información Detallada de la Póliza
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <MicroCard icon={Shield} label="Tipo de Garantía">
+                    {na(poliza.etiqueta_tipo)}
+                  </MicroCard>
+                  <MicroCard icon={Shield} label="Modalidad">
+                    {na(MODALIDAD_LABEL[poliza.modalidad])}
+                  </MicroCard>
+                  <MicroCard icon={Calendar} label="Vigencia Desde">
+                    {na(poliza.vigencia_desde_fmt)}
+                  </MicroCard>
+                  <MicroCard icon={Calendar} label="Vigencia Hasta">
+                    {na(poliza.vigencia_hasta_fmt)}
+                  </MicroCard>
+                  <MicroCard icon={DollarSign} label="Valor Asegurado">
+                    {na(poliza.valor_asegurado_fmt !== '—' ? poliza.valor_asegurado_fmt : null)}
+                  </MicroCard>
+                  <MicroCard icon={Hash} label="Número de Contrato">
+                    {na(poliza.numero_contrato)}
+                  </MicroCard>
+                  <MicroCard icon={User} label="Contratista">
+                    {na(poliza.contratista?.nombre_razon_social)}
+                  </MicroCard>
+                  <MicroCard icon={Building2} label="Aseguradora">
+                    {na(poliza.aseguradora?.nombre)}
+                  </MicroCard>
+                  <MicroCard icon={Briefcase} label="Corredor" full>
+                    {poliza.corredor
+                      ? <span className="text-sm font-semibold text-gray-900 mt-1 break-words">{poliza.corredor.nombre_corredor} — {poliza.corredor.empresa}</span>
+                      : <span className="text-sm font-semibold text-gray-400 mt-1">No registrado</span>}
+                  </MicroCard>
+                  <MicroCard icon={AlignLeft} label="Notas Internas" full>
+                    {poliza.notas_internas
+                      ? <p className="text-sm font-semibold text-gray-900 mt-1 whitespace-pre-wrap leading-relaxed">{poliza.notas_internas}</p>
+                      : <span className="text-sm font-semibold text-gray-400 mt-1 italic">Sin notas registradas.</span>}
+                  </MicroCard>
+                </div>
+              </div>
+            );
+          })()}
         </div>
-        <div className="lg:col-span-3 ud-card p-6">
-          <h2 className="text-lg font-bold mb-4">Checklist de Flujo de Trabajo</h2>
+
+        <div className="lg:col-span-1 ud-card p-6">
+          <h2 className="text-lg font-bold mb-3">Checklist de Flujo de Trabajo</h2>
+
+          {checklist && (() => {
+            const { porcentaje, colorHex, completados, totalPasos } = progresoDeEstado(poliza, checklist);
+            return (
+              <div className="mb-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-xs font-semibold text-ud-gris">Progreso del flujo</span>
+                  <span className="text-xs font-bold" style={{ color: colorHex }}>
+                    {completados} / {totalPasos} pasos · {porcentaje}%
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${porcentaje}%`, backgroundColor: colorHex }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="space-y-2">
             {PASOS.map((paso) => (
               <PasoChecklist key={paso.campo} paso={paso} checklist={checklist} guardando={guardando} onToggle={handleTogglePaso} disabled={!puedeEditar(paso.rol)} />

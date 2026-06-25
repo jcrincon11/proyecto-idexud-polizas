@@ -6,6 +6,10 @@ Servicio de notificaciones para alertas de vencimiento de pólizas.
 Estado actual: MOCK — las funciones simulan el envío logeando la acción
 e insertando un registro en la tabla alertas_vencimiento para trazabilidad.
 
+TODO: Conectar a servicio de mensajería — este módulo debe ser reemplazado
+      por una clase concreta que implemente NotificacionesBase (ver
+      app/services/notificaciones_interface.py).
+
 Para activar envíos reales:
   1. Correo: reemplazar el bloque 'MOCK' en enviar_alerta_correo por
              fastapi_mail (FastMail) con las credenciales SMTP del .env.
@@ -45,6 +49,8 @@ async def enviar_alerta_correo(
     dias_restantes = poliza.dias_para_vencer
 
     # ── MOCK: simular envío ────────────────────────────────────────────────────
+    # TODO: Conectar a servicio de mensajería — reemplazar este bloque por la
+    #       implementación concreta de NotificacionesBase.enviar_email()
     logger.info(
         "[CORREO-MOCK] Para: %s | Póliza: %s | Vence en: %d días | Valor: %s",
         destinatario,
@@ -106,6 +112,8 @@ async def enviar_alerta_sms(
     dias_restantes = poliza.dias_para_vencer
 
     # ── MOCK: simular envío ────────────────────────────────────────────────────
+    # TODO: Conectar a servicio de mensajería — reemplazar este bloque por la
+    #       implementación concreta de NotificacionesBase.enviar_sms()
     logger.info(
         "[SMS-MOCK] Para: %s | Póliza: %s | Vence en: %d días",
         telefono,

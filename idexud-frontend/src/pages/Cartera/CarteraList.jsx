@@ -1,6 +1,9 @@
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
-import { useCartera } from "../../hooks/useCartera";
+import * as XLSX from "xlsx";
+import { useCartera, useCarteraResumen } from "../../hooks/useCartera";
+import CarteraResumenCard, { CarteraResumenSkeleton } from "../../components/cartera/CarteraResumenCard";
+import DashboardHeader from "../../components/layout/DashboardHeader";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -260,8 +263,8 @@ function EditarModal({ poliza, guardando, onClose, onSave }) {
 // ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
 
 export default function CarteraList() {
-  // ── Datos del hook (mock o API según USE_MOCK en useCartera.js) ──────────
   const { cartera, loading, error, actualizarRegistro, refetch } = useCartera();
+  const { resumen, totales, loading: loadingResumen } = useCarteraResumen();
 
   // ── UI local ─────────────────────────────────────────────────────────────
   const [busqueda,       setBusqueda]       = useState("");
@@ -279,7 +282,10 @@ export default function CarteraList() {
       pendientes:     pendientes.length,
       abonados:       abonados.length,
       pagados:        pagados.length,
-      totalPendiente: pendientes.reduce((s, p) => s + p.valor_poliza, 0),
+      // Number() convierte null/undefined/string a número; || 0 descarta NaN
+      totalPendiente: pendientes.reduce((s, p) => s + (Number(p.valor_poliza) || 0), 0),
+      totalAbonado:   abonados.reduce(  (s, p) => s + (Number(p.valor_poliza) || 0), 0),
+      totalPagado:    pagados.reduce(   (s, p) => s + (Number(p.valor_poliza) || 0), 0),
     };
   }, [cartera]);
 
@@ -303,8 +309,12 @@ export default function CarteraList() {
   // si persiste en mock (local) o en la API real (PATCH).
   const handleGuardar = async (cambios) => {
     setGuardandoModal(true);
+    // Omitir strings vacíos: Pydantic rechaza "" como valor de date con 422
+    const payload = Object.fromEntries(
+      Object.entries(cambios).filter(([, v]) => v !== '' && v !== null && v !== undefined)
+    );
     try {
-      await actualizarRegistro(polizaEditando.id, cambios);
+      await actualizarRegistro(polizaEditando.id, payload);
       setPolizaEditando(null);
       setFilaActiva(polizaEditando.id);
       toast.success("Registro actualizado", {
@@ -312,6 +322,12 @@ export default function CarteraList() {
       });
       setTimeout(() => setFilaActiva(null), 2000);
     } catch (err) {
+      console.error('[Cartera] Error guardando registro:', {
+        id: polizaEditando.id,
+        status: err.response?.status,
+        detail: err.response?.data?.detail,
+        payload,
+      });
       toast.error(err?.mensajeUsuario ?? "Error al guardar los cambios.");
     } finally {
       setGuardandoModal(false);
@@ -322,22 +338,38 @@ export default function CarteraList() {
     <div className="min-h-screen bg-gray-50 p-6 font-['Hind',sans-serif]">
 
       {/* ── CABECERA ── */}
-      <div className="mb-6">
-        <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-          <span>IDEXUD</span>
-          <span>›</span>
-          <span className="text-[#CC6628] font-medium">Módulo de Cartera</span>
-        </div>
-        <h1 className="text-2xl font-bold text-gray-900 font-['Lora',serif]">
-          Control de Cartera
-        </h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Seguimiento de préstamos del fondo IDEXUD y reintegros por proyecto.
-        </p>
-      </div>
+      <DashboardHeader
+        title="Control de Cartera"
+        subtitle="Seguimiento de préstamos del fondo IDEXUD y reintegros por proyecto."
+        breadcrumb="IDEXUD · Módulo de Cartera"
+        accent="#3B82F6"
+        accent2="#06B6D4"
+        stats={[
+          { label: 'REGISTROS',  value: loading ? null : cartera.length,  desc: 'Pólizas en cartera'   },
+          { label: 'PENDIENTE',  value: loading ? null : kpis.pendientes,  desc: 'Por reintegrar'        },
+          { label: 'ABONADO',    value: loading ? null : kpis.abonados,    desc: 'Pago parcial'          },
+          { label: 'PAGADO',     value: loading ? null : kpis.pagados,     desc: 'Reintegro completo'    },
+        ]}
+      />
 
       {/* ── BANNER DE ERROR ── */}
       {error && <BannerError mensaje={error} onReintentar={refetch} />}
+
+      {/* ── RESUMEN POR CORREDOR (GET /cartera/resumen) ── */}
+      {(loadingResumen || resumen.length > 0) && (
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Resumen por Corredor</h2>
+            <span className="text-xs text-gray-400 font-normal normal-case">· Agrupado por intermediario de seguros</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {loadingResumen
+              ? Array.from({ length: 3 }).map((_, i) => <CarteraResumenSkeleton key={i} />)
+              : resumen.map((item) => <CarteraResumenCard key={item.corredor_id ?? item.corredor_nombre} item={item} />)
+            }
+          </div>
+        </div>
+      )}
 
       {/* ── KPI CARDS ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -359,20 +391,23 @@ export default function CarteraList() {
           <p className="text-3xl font-bold text-blue-700 mt-1">
             {loading ? <span className="inline-block w-8 h-7 bg-blue-50 rounded animate-pulse" /> : kpis.abonados}
           </p>
+          {!loading && <p className="text-xs text-blue-500 mt-0.5">{formatCOP(kpis.totalAbonado)}</p>}
         </div>
         <div className="bg-white rounded-xl border border-green-100 p-4 shadow-sm">
           <p className="text-xs font-semibold text-green-600 uppercase tracking-wide">Pagados</p>
           <p className="text-3xl font-bold text-green-700 mt-1">
             {loading ? <span className="inline-block w-8 h-7 bg-green-50 rounded animate-pulse" /> : kpis.pagados}
           </p>
+          {!loading && <p className="text-xs text-green-600 mt-0.5">{formatCOP(kpis.totalPagado)}</p>}
         </div>
       </div>
 
       {/* ── BARRA DE HERRAMIENTAS ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm mb-0 p-4
-                      flex flex-col sm:flex-row gap-3 items-stretch sm:items-center
+                      flex flex-wrap gap-3 items-center
                       rounded-b-none border-b-0">
-        <div className="relative flex-1 min-w-0">
+        {/* Buscador — crece, pero respeta el espacio de los controles */}
+        <div className="relative flex-1 min-w-[180px]">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
             fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -388,10 +423,11 @@ export default function CarteraList() {
           />
         </div>
 
+        {/* Filtro de estado — ancho fijo para que no se comprima */}
         <select
           value={filtroEstado}
           onChange={(e) => setFiltroEstado(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700
+          className="shrink-0 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700
                      focus:outline-none focus:ring-2 focus:ring-[#CC6628]/30 focus:border-[#CC6628] bg-white"
         >
           <option value="TODOS">Todos los estados</option>
@@ -400,21 +436,44 @@ export default function CarteraList() {
           <option value="PAGADO">Pagado</option>
         </select>
 
+        {/* Exportar Excel — usa datosFiltrados para respetar la búsqueda activa */}
         <button
-          title="Funcionalidad disponible en fase de integración"
-          className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-[#1A1A1A]
-                     hover:bg-[#333] text-white rounded-lg transition-colors whitespace-nowrap"
+          className="shrink-0 flex items-center gap-2 px-4 py-2 text-sm font-semibold
+                     bg-[#1A1A1A] hover:bg-[#333] text-white rounded-lg transition-colors
+                     whitespace-nowrap"
           onClick={() => {
-            const id = toast.loading("Generando reporte Excel…");
-            setTimeout(() => {
-              toast.success("Reporte listo para descarga", {
-                id,
-                description: "Disponible en la fase de integración con el backend.",
-              });
-            }, 1800);
+            if (datosFiltrados.length === 0) {
+              toast.warning("Sin datos para exportar");
+              return;
+            }
+            const filas = datosFiltrados.map((p, idx) => ({
+              "#":                  idx + 1,
+              "Póliza":             p.numero_poliza ?? "",
+              "Aseguradora":        p.aseguradora   ?? "",
+              "Centro Costo Sol.":  p.centro_costo_solicitante ?? "",
+              "Centro Costo Pag.":  p.centro_costo_pagador     ?? "",
+              "Estado Cartera":     p.estado_cartera ?? "",
+              "N.° Orden Pago":     p.orden_pago_numero  ?? "",
+              "Fecha Orden Pago":   p.orden_pago_fecha   ?? "",
+              "Valor Prima (COP)":  Number(p.valor_poliza ?? 0),
+              "Enlace Soporte":     p.enlace_soporte_pago ?? "",
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(filas);
+            ws["!cols"] = [
+              { wch: 4 }, { wch: 20 }, { wch: 24 }, { wch: 30 }, { wch: 26 },
+              { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 45 },
+            ];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Cartera IDEXUD");
+            const fecha = new Date().toISOString().split("T")[0];
+            XLSX.writeFile(wb, `cartera-idexud-${fecha}.xlsx`);
+            toast.success("Excel generado", {
+              description: `${filas.length} registros exportados correctamente.`,
+            });
           }}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>

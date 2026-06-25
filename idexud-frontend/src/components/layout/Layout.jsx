@@ -4,8 +4,9 @@
  * Layout principal del sistema Idexud con integración de Roles.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { polizasApi } from '../../services/api';
 import {
   LayoutDashboard,
   FileText,
@@ -18,6 +19,7 @@ import {
   Calendar,
   Building2,
   Users,
+  FolderKanban,
 } from 'lucide-react';
 
 import { UserRolBadge } from '../../context/AuthContext';
@@ -29,6 +31,7 @@ const NAV_PRINCIPAL = [
   { label: 'Cartera', icon: Wallet, href: '/cartera', descripcion: 'Legalización y Cartera' },
   { label: 'Corredores', icon: Users, href: '/Corredores', descripcion: 'Corredores' },
   { label: 'Aseguradoras', icon: Building2, href: '/aseguradoras', descripcion: 'Aseguradoras' },
+  { label: 'Proyectos', icon: FolderKanban, href: '/proyectos', descripcion: 'Proyectos SIEXUD' },
 ];
 
 const NAV_SECUNDARIO = [
@@ -103,9 +106,17 @@ function Topbar({ sidebarCollapsed, title, breadcrumb }) {
   );
 }
 
-export default function Layout({ children, alertaCount = 0 }) {
+export default function Layout({ children }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [alertaCount, setAlertaCount] = useState(0);
   const location = useLocation();
+
+  useEffect(() => {
+    polizasApi
+      .listar({ estado: 'POR_VENCER', por_pagina: 1 })
+      .then(({ data }) => setAlertaCount(data.total ?? 0))
+      .catch(() => {}); // falla silenciosamente: badge queda en 0
+  }, []);
 
   const paginaActual = [...NAV_PRINCIPAL, ...NAV_SECUNDARIO].find(item => item.href === location.pathname);
 
